@@ -125,6 +125,8 @@ The canonical schema has both a single `users.type` discriminator and per-instit
 
 Laravel 13 / PHP 8.3+ / MySQL / Sanctum versions must be verified against the actual local environment and current official documentation before scaffolding. This is a technical check, not a scope decision.
 
+Status (2026-10-27): Verified locally; one check pending (Windows PHP security build) — see docs/DECISION_LOG.md D-003.
+
 ### Other open items raised while drafting the API contract
 
 These are recorded so they are not silently decided; current proposals are in `docs/API_CONTRACT.md`.

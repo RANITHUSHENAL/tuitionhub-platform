@@ -1,0 +1,134 @@
+# TuitionHub — Technical Decision Log
+
+**Purpose:** Record of technical and environment decisions, with the evidence behind each one. Product scope decisions (C1–C9, open items) live in `docs/PRODUCT_DECISIONS.md`. This log records how those decisions were put into practice.
+**Branch at time of writing:** `sprint/day1-api-scaffold`
+**Recorded:** 2026-10-27
+
+Each entry separates **Verified** facts (checked by a command, with its output on record) from **Pending** checks (not yet confirmed). An entry is not complete until its pending checks are closed.
+
+> Naming note: the approved Day 1 plan used `D1`/`D2` for open decisions. Plan `D2` (root lint isolation) is recorded here as **D-008**. Plan `D1` is the C8 role question and stays open (see "Pending founder decisions").
+
+---
+
+## D-001 — Monorepo layout and branch discipline
+
+- **Decision:** The React frontend stays at the repository root. The Laravel API lives in `/api`. Sprint work happens on `sprint/*` branches, never directly on `main`.
+- **Verified:**
+  - `api/` was created by `composer create-project` without changing any root frontend file (`git diff` was empty for root files after scaffolding).
+  - Commits so far: `0c3b0fc` (docs), `fdba18a` (scaffold), `fdb6395` (lint), `1f3aaf5` (logs placeholder), `765843f` (MySQL/UTC config). None has been pushed or merged.
+- **Pending:** none.
+
+## D-002 — Local PHP runtime: manual PHP install instead of Laravel Herd
+
+- **Decision:** Use a manually installed PHP 8.5 (non-thread-safe, x64) build at `C:\php84` as the command-line PHP. The folder name is historical; the version inside is 8.5. Laravel Herd was abandoned. XAMPP's PHP 8.2.12 is no longer the `php` on PATH.
+- **Verified:**
+  - `php -v` → PHP 8.5.12 (NTS, Visual C++ 2022 x64). `which php` → `C:\php84\php`.
+  - Composer 2.8.12 runs on `C:\php84\php.exe`.
+  - Extensions the plan requires are loaded: pdo_mysql, mbstring, openssl, fileinfo, curl, zip, intl, sodium, tokenizer, xml, ctype, bcmath.
+  - The Herd 2.0.1 installer failed with "Error opening file for writing: …\HerdHelper.exe". The installer had a valid signature from Beyond Code GmbH. No process was locking the file. Bitdefender was the active antivirus and had quarantined files at the same times as the install attempts.
+- **Not confirmed:** that Bitdefender quarantined `HerdHelper.exe` specifically. The quarantine entries could not be read.
+- **Pending:** Windows PHP security build (Brotli). Confirm the installed Windows build is the intended security build for the Brotli item raised by the founder.
+
+## D-003 — C9 runtime and framework version verification
+
+- **Decision:** These versions are the verified local baseline for the sprint (closes C9 for the local environment, subject to the pending checks below).
+
+| Component | Version | Evidence |
+|---|---|---|
+| PHP (command line) | **8.5.12** | `php -v` |
+| Composer | 2.8.12 | `composer --version` |
+| Laravel framework | **13.38.0** | `php artisan --version`; `composer.lock` |
+| laravel/laravel skeleton | commit `06d016a` | Composer cache archive used for the integrity comparison |
+| PHPUnit | 12.5.40 | `composer create-project` output |
+| MySQL server | **8.4.13** | `php artisan db:show`; `SELECT version()` |
+| Node / npm (frontend) | 24.11.1 / 11.6.2 | `node -v`, `npm -v` (2026-10-19) |
+
+- **Verified:**
+  - Laravel 13 officially supports PHP 8.3–8.5 (verified via official docs). Source: the Support Policy table in the Laravel 13.x release notes (`https://laravel.com/docs/13.x/releases`, checked 2026-10-27) lists "13 | 8.3 - 8.5" and states "Laravel 13.x requires a minimum PHP version of 8.3."
+  - Laravel 13 requires `"php": "^8.3"`, and Composer resolved every dependency on PHP 8.5 without platform conflicts.
+  - The default test suite passes on PHP 8.5.12 (2 tests, 2 assertions).
+- **Pending:**
+  - The PHP security-build item from D-002.
+  - The `mysql` command-line client on PATH is 8.0.46. This doesn't affect the app, but manual tooling uses that older client.
+
+## D-004 — Local database: MySQL 8.4 LTS with a dedicated app account
+
+- **Decision:** Use MySQL 8.4 LTS on `127.0.0.1:3306`. The app connects as a dedicated account, not `root`. XAMPP's MariaDB 10.4 (end of life) is not used.
+- **Verified:**
+  - Connection `mysql`, database `tuitionhub`, host `127.0.0.1`, port `3306`, 0 tables (`php artisan db:show`, before any migrations).
+  - `current_user()` → `tuitionhub_app@127.0.0.1`.
+  - An earlier port-3306 conflict between two `mysqld.exe` processes was resolved by the founder outside this repo. The server Laravel now reaches is 8.4.13.
+- **Constraint:** the account is bound to host `127.0.0.1`, so `DB_HOST` must stay `127.0.0.1`. With `localhost`, MySQL may match a different account.
+- **Pending:**
+  - **MySQL privileges.** `SHOW GRANTS` for `tuitionhub_app` has not been reviewed. Its rights must be limited to the app databases.
+  - **Test database.** Whether a `tuitionhub_test` database exists and is granted has not been checked (see D-009).
+  - `DB_PASSWORD` exists only in the local, ignored `api/.env`. It is never committed or printed.
+
+## D-005 — UTC timezone for the database session
+
+- **Decision:** The MySQL connection uses UTC (`'timezone' => env('DB_TIMEZONE', '+00:00')` in `api/config/database.php`, `mysql` connection only). The application timezone stays UTC. Class schedules are interpreted in `Asia/Colombo` in application code (per `docs/API_CONTRACT.md` §1.5), not by the database.
+- **Verified:** `SELECT @@session.time_zone` → `+00:00`. `php artisan about` → Timezone `UTC`. Committed in `765843f`.
+- **Pending:** none.
+
+## D-006 — Scaffold method and skeleton integrity
+
+- **Decision:** Scaffold with `composer create-project "laravel/laravel:^13.0" api --prefer-dist --no-scripts`. Skipping the post-create scripts avoids their automatic SQLite database and migration run. `.env` and `APP_KEY` were created by hand afterwards.
+- **Verified:**
+  - Every tracked `api/` file was compared byte for byte with the cached skeleton archive. The only differences are:
+    - `AGENTS.md` and `CLAUDE.md` removed on purpose (D-007).
+    - `composer.lock` added (generated at install).
+    - `.env.example`, `.gitignore` and `config/database.php` changed (approved configuration).
+  - The root `.gitignore` (Vite template) rule `logs` had excluded `api/storage/logs/.gitignore` from the scaffold commit. It was force-added in `1f3aaf5`. A test log file was confirmed to stay ignored.
+  - `api/.env.example` line 1 contained `ppAPP_NAME=Laravel`: a stray edit on 2026-10-25, after scaffolding, that went into `fdba18a`. It was restored to `APP_NAME=Laravel` in `765843f`.
+- **Pending:** none.
+
+## D-007 — Laravel Boost agent files removed
+
+- **Decision:** Delete the skeleton's `api/CLAUDE.md` and `api/AGENTS.md` (two identical files). Laravel Boost is not installed.
+- **Reason:**
+  - The files told AI agents to run `composer require laravel/boost --dev` and `php artisan boost:install` before any change.
+  - If PHP was missing, they told agents to run a remote install script (`iex (… DownloadString('https://php.new/…'))`).
+  - Both conflict with the approval gate on package installs and with running remote code.
+- **Verified:** neither file is in any commit. The root `CLAUDE.md` is the only Claude instruction file in the repo.
+- **Note:** the root `AGENTS.md` (Codex instructions) is a separate, founder-reviewed file. It is deliberately left untracked.
+- **Pending:** none. Adding Boost later would need its own approval.
+
+## D-008 — Root ESLint ignores `api/`
+
+- **Decision:** Add `'api/'` to `ignorePatterns` in the root `.eslintrc.cjs`, so frontend lint does not scan Laravel's `vendor/` JavaScript.
+- **Verified:**
+  - Before: `npm run lint` failed with 837 problems. 738 errors and 84 warnings came from `api/vendor/**/*.js`; `src/` alone had 0 errors and 15 warnings.
+  - After: 0 errors, 15 warnings, exit code 0.
+  - `npm run build` passes. Its chunk-size warning was already there and is unrelated.
+  - Committed in `fdb6395`.
+- **Pending:** none.
+
+## D-009 — Environment files and test database isolation
+
+- **Decision:**
+  - `api/.env` and `api/.env.testing` are local only and ignored by Git. `api/.env.example` is committed with safe placeholders.
+  - For now, tests use the skeleton's `phpunit.xml` defaults: SQLite in memory (`DB_DATABASE=:memory:`), session/cache in memory, so they never touch MySQL.
+- **Verified:**
+  - `git check-ignore`: `api/.env` → `api/.gitignore:3`, `api/.env.testing` → `api/.gitignore:6`, `api/.env.example` not ignored.
+  - No `DB_*`/`APP_*` Windows environment variables exist that could override `phpunit.xml`.
+  - Staged `.env.example` checked: `APP_KEY=` and `DB_PASSWORD=` are empty.
+  - `php artisan test`: 2 passed.
+- **Pending:** the approved Day 1 plan proposed running tests on MySQL (`tuitionhub_test`), because MySQL-specific behaviour (generated columns, row locks) needs real MySQL coverage. That switch has not been made. It needs the test database and grants (D-004) and approval before it changes.
+
+---
+
+## Pending founder decisions
+
+### C8 — `users.type` vs multi-role `user_roles` — **Open**
+
+Not decided. `docs/API_CONTRACT.md` §3 *proposes* institute-scoped `user_roles` as authoritative for authorisation. A related choice is a custom `user_roles` table versus `spatie/laravel-permission` with teams.
+
+Founder confirmation is needed before role migrations, policies or role seeding are written. This blocks migration group 3 onwards in the approved Day 1 plan.
+
+## Not yet done from the approved Day 1 plan (status as of 2026-10-27)
+
+- Step 3: `install:api` (Sanctum), `statefulApi()`, the `/api/v1` route group, the CORS config, and the `config/otp.php` and `config/demo.php` files.
+- Step 4: migration groups 0–2 (framework tables, lookups, `otp_challenges`, `audit_logs`). No migrations have been written or run.
+- Step 5: OTP and auth tests.
+
+Each of these needs its own approval before work starts.

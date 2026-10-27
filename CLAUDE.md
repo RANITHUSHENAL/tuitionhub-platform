@@ -60,6 +60,7 @@ Build a secure, maintainable, working TuitionHub product for the Sri Lankan tuit
 6. Run relevant tests, linters, builds and browser checks where available.
 7. Review the diff for security and regressions; report what was not tested.
 8. Update `docs/PRODUCT_DECISIONS.md` when an approved product or technical decision changes, and the `docs/API_CONTRACT.md` changelog when the contract changes.
+   Record technical and environment decisions (with verified facts vs pending checks) in `docs/DECISION_LOG.md`.
 9. Summarize changed files, commands run, test results, risks and next steps. Never claim success without evidence.
 
 ## Definition of done
