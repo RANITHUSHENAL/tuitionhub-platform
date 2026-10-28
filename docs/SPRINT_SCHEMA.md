@@ -647,7 +647,7 @@ Each item is a PROPOSAL or a gap that C1–C8, D-011/D-012 and contract v0.2 do 
 
 # Part 2 — R2: `audit_logs` and G4 (APPROVED under D-015)
 
-**Status:** **APPROVED (D-015) — Migration Specification for R2.** Approved by: Ranithu Shenal on 28/10/2026. Q25–Q37 are resolved, and the API behaviour is in contract v0.3.
+**Status:** **APPROVED (D-015) — Migration Specification for R2.** Approved by: Ranithu Shenal on 2026-10-28. Q25–Q37 are resolved, and the API behaviour is in contract v0.3.
 
 - **Implementation** is a separate approved task (`CLAUDE.md` approval gate). The first run is on the disposable `tuitionhub_test` database only (VP-37).
 - **Still open:** the audit IP retention period (pre-launch privacy review) and the real-money guardian billing policy (separate pre-launch review).
@@ -957,7 +957,7 @@ Cases are numbered after VP-26. "DB" cases are direct inserts asserting the MySQ
 
 ## R2 decisions (D-015)
 
-All items were approved by Ranithu Shenal on 28/10/2026 (D-015). The two pre-launch items at the end remain **unresolved**.
+All items were approved by Ranithu Shenal on 2026-10-28 (D-015). The two pre-launch items at the end remain **unresolved**.
 
 | # | Topic | Decision | Status |
 |---|---|---|---|
