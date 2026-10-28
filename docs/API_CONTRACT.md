@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.2 |
-| **Date** | 2026-10-28 (0.1: 2026-10-19) |
+| **Version** | `v1` draft 0.3 |
+| **Date** | 2026-10-28 (0.1: 2026-10-19; 0.2: 2026-10-28) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
-| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). |
+| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. |
 | **Schema source** | `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema), adapted as listed in §2. |
 
 > **Demo-money boundary.** Nothing in this contract moves real money. All payments are `provider: "mock"`, all commission rows are demo accruals, and there are no settlement, payout, refund-processing or live-gateway endpoints. See §11.
@@ -134,8 +134,8 @@ Settlements and payouts (`settlements`, `settlement_items`, `institute_bank_acco
 | `teacher_profiles.is_independent`, `public_visibility` | Columns kept with defaults (`false`, `institute_attributed`); not editable via sprint API | Independent-teacher flow not in sprint |
 | `student_profiles.user_id` (required), no name | Add `uuid`, `full_name`, `managing_institute_id`, `created_by_user_id`; `user_id` **nullable** | Institute-managed student records (C6) |
 | `student_profiles.nic`, `school_id` | **Not built** | No NIC/ID collection for minors (C6); schools lookup out of scope |
-| `student_guardians` | Add `linked_by_user_id`, `linked_at`, `revoked_by_user_id`, `revoked_at`, `invitation_id`; never hard-deleted; one active link per (student, guardian) | C6 history/audit |
-| — | **New** `guardian_invitations`: `uuid`, `student_id`, `institute_id`, `invited_by_user_id`, `guardian_phone`, `relationship`, `code_hash` (HMAC-SHA256 keyed by app secret), `status` (`pending\|accepted\|revoked\|expired`), `expires_at`, `accepted_at`, `accepted_by_user_id`, `revoked_at`, `revoked_by_user_id` | C6 invitation codes |
+| `student_guardians` | Add `linked_by_user_id`, `linked_at`, `revoked_by_user_id`, `revoked_at`, `invitation_id`; never hard-deleted; one active link per (student, guardian); at most one **active primary** link per student (§9.2, §9.4) | C6 history/audit; D-015 |
+| — | **New** `guardian_invitations`: `uuid`, `student_id`, `institute_id`, `invited_by_user_id`, `guardian_phone`, `relationship`, `code_hash` (HMAC-SHA256 keyed by the dedicated secret `GUARDIAN_INVITE_HMAC_KEY`, §9.1), `status` (`pending\|accepted\|revoked\|expired`), `expires_at`, `accepted_at`, `accepted_by_user_id`, `revoked_at`, `revoked_by_user_id` | C6 invitation codes |
 | Automatic 72-hour child restriction | **Removed** | C6 |
 | `classes.hall_id`, `slug` | `hall_id` not built; `slug` optional/not used in routes | Halls out of scope; routes use UUID |
 | `class_enrollments.qr_token`, `student_card_no` | Not generated in sprint | Attendance method is `manual` only |
@@ -587,7 +587,7 @@ Student shape (`Student`, institute view):
 `exam_target_code` and `date_of_birth` optional.
 
 - **Success `201`:** `{ "data": Student }`
-- **Rules:** Creates an institute-managed `student_profiles` row (`managing_institute_id` and `created_by_user_id` from server; `user_id = NULL`). No NIC, ID documents or photos are accepted. Demo/seed data must be fictional.
+- **Rules:** Creates an institute-managed `student_profiles` row (`managing_institute_id` and `created_by_user_id` from server; `user_id = NULL`). No NIC, ID documents or photos are accepted. Demo/seed data must be fictional. Audited (`student.created`, without the student's name or date of birth; §13).
 - **Errors:** `401`, `403`, `404`, `422`.
 
 ### 8.2 `GET /api/v1/institutes/{instituteUuid}/students?q=&grade_code=&page=&per_page=`
@@ -662,7 +662,16 @@ Student shape (`Student`, institute view):
 ```
 
 - **Rules:** `code` is returned **only in this response**, shown once in the protected institute UI, and is never logged or stored in plaintext (stored as `code_hash`). Single-use; proposed expiry 48 h (configurable). A pending invitation for the same student and phone → `409`. Audited without the code.
-- **Errors:** `401`, `403`, `404`, `409`, `422`.
+- **Code generation and format:**
+  - 8 characters drawn from a cryptographically secure random source, using the unambiguous alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (no `0 O 1 I L U`).
+  - The code is displayed and returned as `XXXX-XXXX`.
+- **Dedicated key:**
+  - `code_hash` = HMAC-SHA256 of the **normalised** code (§9.2), keyed by the dedicated secret `GUARDIAN_INVITE_HMAC_KEY`. That key is never committed, printed or logged.
+  - If the key is not configured, invitation creation and acceptance fail closed with `503`. Other endpoints and Artisan commands are unaffected.
+- **Lazy expiry:**
+  - An invitation whose `expires_at` has passed is treated as **expired** on every read and action, whatever its stored `status`. A stored `pending` never overrides an expired timestamp.
+  - No scheduler is required. The stored status is moved to `expired` when a write touches the row.
+- **Errors:** `401`, `403`, `404`, `409`, `422`, `503` (invitation key not configured).
 
 ### 9.2 `POST /api/v1/guardian-invitations/accept`
 
@@ -686,14 +695,27 @@ Student shape (`Student`, institute view):
 ```
 
 - **Rules:** In one transaction with the invitation row locked: invitation must be `pending` and unexpired; the caller's phone must have `phone_verified_at` set and equal `guardian_phone`. The invitation is marked `accepted` and an active `student_guardians` link is created (`linked_by_user_id` = inviter, `linked_at` = now, `invitation_id`). A `guardian_profiles` row is created if missing. No role is created; guardian access is derived from the active `student_guardians` link (§3). Audited (`guardian_invitation.accepted`, `guardian_link.created`).
-- **Errors:** `401`; `422` for unknown/expired/used code **or** phone mismatch (single generic message); `409` if an active link already exists; `429`.
+- **Code normalisation:**
+  - Before hashing, the submitted code is upper-cased and **spaces and hyphens are removed**.
+  - Anything that is not then exactly 8 characters from the §9.1 alphabet gets the same generic `422`.
+- **Phone matching:** the caller must be authenticated, with `phone_verified_at` set, and the account phone must equal `guardian_phone` exactly (E.164). A mismatch gets the generic `422`.
+- **Initial primary guardian:**
+  - In the same transaction, with the **student row locked**, the new link becomes primary (`is_primary = true`) only if the student has no active primary guardian; otherwise it is not primary.
+  - When the new link becomes primary, `guardian_link.created` records the previous primary link ID (`null`) and the new primary link ID (§13).
+  - There is no endpoint to choose or change the primary manually.
+- **Errors:**
+  - `401`.
+  - `422` for an unknown, expired, used or malformed code, **or** a phone mismatch (single generic message).
+  - `409` if an active link already exists.
+  - `429`.
+  - `503` if the invitation key is not configured.
 
 ### 9.3 `POST /api/v1/guardian-invitations/{invitationUuid}/revoke`
 
 - **Permission:** the inviter (while still staff/admin of the same institute), or `super_admin`.
 - **Request:** none.
 - **Success `200`:** `{ "data": { "uuid": "uuid", "status": "revoked", "revoked_at": "…" } }`
-- **Rules:** Only `pending` invitations can be revoked (`409` otherwise). Records `revoked_by_user_id`. Audited.
+- **Rules:** Only `pending` invitations can be revoked (`409` otherwise). An invitation past `expires_at` counts as expired (§9.1), so it also gets `409`. Records `revoked_by_user_id`. Audited.
 - **Errors:** `401`, `403`, `404`, `409`.
 
 ### 9.4 `DELETE /api/v1/students/{studentUuid}/guardian-links/{guardianUuid}`
@@ -701,6 +723,13 @@ Student shape (`Student`, institute view):
 - **Permission:** admin of the student's managing institute, or `super_admin`. `guardianUuid` is the guardian's **user** UUID.
 - **Success `204`.**
 - **Rules:** Soft-revokes the active link: sets `revoked_at` and `revoked_by_user_id`. The row is **never** hard-deleted and revocation history is preserved. Access through §9.5, §10.5 and §11 is lost immediately. Audited (`guardian_link.revoked`).
+- **Atomic primary promotion:**
+  - The **student row is locked** first.
+  - The link is revoked, which frees the primary slot.
+  - If it was the primary, the **oldest remaining active link** (by `linked_at`, then by internal id) becomes primary, in the same transaction.
+  - If no active link remains, the student has no primary guardian.
+  - The `guardian_link.revoked` audit row records the old primary link ID and the new primary link ID (`null` if none) (§13).
+  - Invoices already issued keep their `billed_guardian_id` (§11.2).
 - **Errors:** `401`, `403`, `404` (no active link).
 
 ### 9.5 `GET /api/v1/parents/me/children`
@@ -895,7 +924,7 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 ```
 
 - **Success `201`:** `{ "data": Invoice }`
-- **Rules:** Enrolment must be active. The server selects the fee version effective on `issued_on` (`422` if none), resolves the commission rule, writes the invoice, one `tuition` item and all snapshots in one transaction, and sets `billed_guardian_id` to the student's primary active guardian (or `NULL` if none is linked yet). `due_on` ≥ `issued_on`. One non-cancelled invoice per (enrolment, billing period) → else `409`. Amounts in the request are rejected. Audited.
+- **Rules:** Enrolment must be active. The server selects the fee version effective on `issued_on` (`422` if none), resolves the commission rule, writes the invoice, one `tuition` item and all snapshots in one transaction, and sets `billed_guardian_id` to the student's primary active guardian (or `NULL` if none is linked yet). `billed_guardian_id` is an **immutable addressee snapshot**: the primary is chosen only by §9.2 and §9.4; later primary changes or revocations never alter an existing invoice; and it does not limit who may view or pay (§11.5, §11.6). `due_on` ≥ `issued_on`. One non-cancelled invoice per (enrolment, billing period) → else `409`. Amounts in the request are rejected. Audited.
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
 ### 11.3 `GET /api/v1/institutes/{instituteUuid}/invoices?status=&billing_period=&class_uuid=&student_uuid=&page=&per_page=`
@@ -912,13 +941,17 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 
 ### 11.5 `GET /api/v1/invoices/{invoiceUuid}`
 
-- **Permission:** billed guardian — any guardian with an **active** link to the invoice's student (proposal; `billed_guardian_id` is the addressee) — or billing user of the invoice's institute, or `super_admin` (read-only).
+- **Permission:**
+  - **Any linked guardian:** any guardian with an **active** link to the invoice's student, regardless of `billed_guardian_id`, which is only the addressee (D-015).
+  - The billing user of the invoice's institute.
+  - `super_admin` (read-only).
+  - A revoked link grants nothing.
 - **Success `200`:** `{ "data": Invoice & { "payments": [Payment] } }`
 - **Errors:** `401`, `404`.
 
 ### 11.6 `POST /api/v1/invoices/{invoiceUuid}/payment-attempts`
 
-- **Permission:** billed guardian (as §11.5). `super_admin` and institute users may not create payment attempts (`403`).
+- **Permission:** any linked guardian (as §11.5): any guardian with an **active** link to the invoice's student, regardless of `billed_guardian_id`. `super_admin` and institute users may not create payment attempts (`403`).
 - **Request:**
 
 ```json
@@ -980,6 +1013,11 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 - **Rules:**
   - Only `pending` attempts transition. Repeating the same outcome on an already-completed attempt returns the same result (`200`); a different outcome → `409`.
   - On `succeeded`, in one transaction with the invoice and payment rows locked: payment → `succeeded` with `paid_at`; invoice → `paid`; exactly **one** `platform_commissions` accrual (`status = accrued`, `is_demo = true`, unique per payment) is created. A second success for an already-paid invoice → `409`.
+  - **Completion guarantees** (demo only; no settlement or payout exists):
+    - Completing `succeeded` is **atomic**. The invoice row and then the payment row are locked, and the invoice status is re-checked under the lock.
+    - An invoice that is already `paid` (or `cancelled`) is **rejected** with `409`, and that attempt is not marked `succeeded`.
+    - At most **one** payment per invoice can ever be `succeeded`, so an invoice can never be paid twice or accrue commission twice. The single accrual is also enforced by the unique `payment_id` on `platform_commissions`.
+    - This holds even though several linked guardians may start attempts (§11.6: one `pending` attempt per invoice at a time).
   - No real money moves. Audited (`payment.succeeded|failed|cancelled`, `commission.accrued`).
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
@@ -1083,7 +1121,18 @@ Only `is_active = true` products.
 
 Written to `audit_logs` (immutable, no soft deletes) with actor, target, old/new values, IP and user agent. Never include OTP codes, invitation codes or session secrets.
 
-`institute.created`, `institute.updated`, `institute.status_changed`, `teacher.assigned`, `class.created`, `class.updated`, `fee.version_created`, `enrollment.created`, `guardian_invitation.created`, `guardian_invitation.accepted`, `guardian_invitation.revoked`, `guardian_link.created`, `guardian_link.revoked`, `attendance.recorded`, `attendance.corrected`, `invoice.created`, `payment.attempt_created`, `payment.succeeded`, `payment.failed`, `payment.cancelled`, `commission.accrued`, `boost_purchase.recorded_demo`.
+- **Same transaction:** the audit row is written in the same database transaction as the business operation.
+- **Snapshots** contain only allowlisted fields. Never included: OTP or invitation codes or their hashes, passwords, tokens, the student's name or date of birth, or **full phone numbers**. A masked phone (`+9477*****67`, as in §9.1) is allowed.
+- **IP addresses** are stored raw in the sprint. They are readable only by direct database access, because no sprint endpoint exposes `audit_logs`. The retention period is **pending a pre-launch privacy review**.
+- **Targets** are recorded as stable short aliases (e.g. `student_guardian`), never class names. Platform-level events may have no institute.
+- **Primary-guardian changes** are recorded inside the triggering event, with no new event name and no personal data:
+  - `guardian_link.created`, when the new link becomes the initial primary (§9.2).
+  - `guardian_link.revoked`, when a revocation promotes another link (§9.4).
+  - Both carry the old primary link ID and the new primary link ID (either may be `null`).
+
+`institute.created`, `institute.updated`, `institute.status_changed`, `teacher.assigned`, `teacher_assignment.ended`, `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `student.created`, `class.created`, `class.updated`, `fee.version_created`, `enrollment.created`, `guardian_invitation.created`, `guardian_invitation.accepted`, `guardian_invitation.revoked`, `guardian_link.created`, `guardian_link.revoked`, `attendance.recorded`, `attendance.corrected`, `invoice.created`, `payment.attempt_created`, `payment.succeeded`, `payment.failed`, `payment.cancelled`, `commission.accrued`, `boost_purchase.recorded_demo`.
+
+`role.granted`, `role.revoked`, `staff.added`, `staff.ended` and `teacher_assignment.ended` are written by server-side services. There is no staff-management or assignment-end endpoint in the sprint. The owner's automatic `institute_admin` grant writes `role.granted` in the same transaction as `institute.created`.
 
 ---
 
@@ -1136,8 +1185,8 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 11.2 | POST | `/api/v1/enrollments/{enrollmentUuid}/invoices` | institute billing user |
 | 11.3 | GET | `/api/v1/institutes/{instituteUuid}/invoices` | institute billing user, super_admin (read-only) |
 | 11.4 | GET | `/api/v1/parents/me/invoices` | authenticated (active links) |
-| 11.5 | GET | `/api/v1/invoices/{invoiceUuid}` | billed guardian, billing user, super_admin (read-only) |
-| 11.6 | POST | `/api/v1/invoices/{invoiceUuid}/payment-attempts` | billed guardian |
+| 11.5 | GET | `/api/v1/invoices/{invoiceUuid}` | any active linked guardian, billing user, super_admin (read-only) |
+| 11.6 | POST | `/api/v1/invoices/{invoiceUuid}/payment-attempts` | any active linked guardian |
 | 11.7 | POST | `/api/v1/demo/payment-attempts/{paymentUuid}/complete` | payer; demo flag + non-production only |
 | 11.8 | GET | `/api/v1/admin/commission-accruals` | super_admin |
 | 12.1 | GET | `/api/v1/boost-products` | public |
@@ -1152,3 +1201,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 |---|---|---|
 | 0.1 draft | 2026-10-19 | Initial sprint contract from approved decisions C1–C7 and OTP decision. Roles pending C8. |
 | 0.2 draft | 2026-10-28 | C8 approved: hybrid role model; derived teacher/guardian access; super_admin billing read-only. §3: teacher class access needs the class assignment; ended/revoked relationships grant nothing. §4.2/§4.4: `roles` holds stored roles only (`institute_uuid` null for `super_admin`); added `teaching_at` and `active_child_link_count` as display hints. §5.3: includes teaching institutes; `my_roles` renamed `my_access`. §6.2/§9.2: no teacher/guardian role rows. Index §5.4/§7.2: "member" replaced by "staff/admin" to match the endpoint sections. |
+| 0.3 draft | 2026-10-28 | **D-015 approved** (Ranithu Shenal, 28/10/2026). §2.3: dedicated `GUARDIAN_INVITE_HMAC_KEY` for `code_hash`; at most one active primary link per student. §8.1: `student.created` audited. §9.1: code generation (8 characters, unambiguous alphabet, secure random source, `XXXX-XXXX`), dedicated HMAC key (fail closed, `503`), lazy expiry checked on every read. §9.2: normalisation (upper-case, remove spaces and hyphens), authenticated phone match, initial primary under a student-row lock; no manual primary selection. §9.3: an expired invitation cannot be revoked (`409`). §9.4: atomic primary promotion after revocation, with old/new link IDs audited. §11.2: `billed_guardian_id` is an immutable addressee snapshot. §11.5/§11.6: any actively linked guardian may view an invoice and start a demo payment, regardless of `billed_guardian_id` (§15 labels updated). §11.7: atomic demo completion; already-paid invoices rejected; no double success or double accrual. §13: events `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended`, `student.created`; primary changes recorded in `guardian_link.created`/`guardian_link.revoked`; masked phones only; raw IP with retention pending pre-launch privacy review; stable target aliases. |

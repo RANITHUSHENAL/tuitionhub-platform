@@ -1,6 +1,6 @@
 # TuitionHub — Sprint Schema (migration specification)
 
-**Status:** APPROVED (D-013) — Migration Specification. Part 1 covers groups **G1–G3** only (`CLAUDE.md` source order, item 4). Approval is conditional on VP-1: these migrations run first only on the disposable `tuitionhub_test` database (D-013).
+**Status:** APPROVED (D-013) — Migration Specification. Part 1 covers groups **G1–G3** (`CLAUDE.md` source order, item 4). Part 2 (R2: `audit_logs` and G4) is approved separately under D-015. Approval is conditional on VP-1: these migrations run first only on the disposable `tuitionhub_test` database (D-013).
 **Prepared:** 2026-10-28, branch `sprint/day1-api-scaffold`. **Revision 2** (2026-10-28) applies the founders' direction on Q1–Q24.
 **Sources, highest first:** `docs/PRODUCT_DECISIONS.md` (C1–C8) → `docs/DECISION_LOG.md` approved entries (D-005, D-011, D-012) → `docs/API_CONTRACT.md` v0.2 → this file → `docs/reference/TuitionHub_Sprint_Schema_Draft.md` and `docs/reference/TuitionHub_ER_Schema.md` (historical).
 
@@ -642,3 +642,337 @@ Each item is a PROPOSAL or a gap that C1–C8, D-011/D-012 and contract v0.2 do 
 - **G7 Money (demo):** `commission_rules`, `invoices` (`billing_period` storage open), `invoice_items`, `payments`, `payment_transactions`, `platform_commissions`.
 - **G8 Boost (demo):** `boost_products`, `boost_purchases`.
 - **Not built:** `institute_settings` (F5), and everything in contract §2.2.
+
+---
+
+# Part 2 — R2: `audit_logs` and G4 (APPROVED under D-015)
+
+**Status:** **APPROVED (D-015) — Migration Specification for R2.** Approved by: Ranithu Shenal on 28/10/2026. Q25–Q37 are resolved, and the API behaviour is in contract v0.3.
+
+- **Implementation** is a separate approved task (`CLAUDE.md` approval gate). The first run is on the disposable `tuitionhub_test` database only (VP-37).
+- **Still open:** the audit IP retention period (pre-launch privacy review) and the real-money guardian billing policy (separate pre-launch review).
+- **"PROPOSAL"** labels in the tables below record where each item originally came from. All Q25–Q37 items are approved by D-015.
+
+- **Conventions:** §0 applies unchanged: UTC `DATETIME` instants written by the app, `DATE` for calendar dates, `VARCHAR(32)` + CHECK, `ON DELETE RESTRICT`, explicit constraint names, server-side canonical values, no soft deletes.
+- **Labels:** "Decided" and "PROPOSAL" have the same meaning as in Part 1.
+- **Prior evidence:** D-014 (VP-1) showed that MySQL 8.4 accepts a CHECK on columns whose FK is explicit `ON DELETE RESTRICT`. R2 relies on the same pattern, re-checked in VP-37.
+
+## R2.0 `audit_logs`
+
+Purpose: the immutable audit trail of contract §13 ("actor, target, old/new values, IP and user agent"). **Hard prerequisite:** this table must exist before any audited flow runs, including G1–G3 role, institute and staff flows (Part 1, "Later groups").
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `user_id` | BIGINT UNSIGNED | Yes | NULL | actor; NULL = system action | Decided (contract §13 "actor"; canonical) |
+| `institute_id` | BIGINT UNSIGNED | Yes | NULL | tenant scope of the event, for institute-scoped queries | PROPOSAL (brief) |
+| `action` | VARCHAR(64) | No | — | dotted event name from contract §13, e.g. `guardian_link.revoked` | Decided names (contract §13); PROPOSAL type |
+| `auditable_type` | VARCHAR(64) | No | — | target type as a **morph alias** (e.g. `student_guardian`), never a PHP class name | Decided "target" (contract §13); PROPOSAL alias rule and NOT NULL |
+| `auditable_id` | BIGINT UNSIGNED | No | — | target row id (no FK: polymorphic) | Decided "target"; PROPOSAL NOT NULL |
+| `old_values` | JSON | Yes | NULL | allowlisted fields only (see rules) | Decided (contract §13) |
+| `new_values` | JSON | Yes | NULL | allowlisted fields only | Decided (contract §13) |
+| `ip_address` | VARCHAR(45) | Yes | NULL | request IP (IPv6-safe length) | Decided field (contract §13); PROPOSAL type |
+| `user_agent` | VARCHAR(512) | Yes | NULL | truncated to 512 characters | Decided field (contract §13); PROPOSAL length |
+| `created_at` | DATETIME | **No** | — | UTC; always set by the application | Decided (contract §13, §0.6) |
+
+- **No `updated_at` or `deleted_at`** (contract §13: "immutable, no soft deletes"). The Eloquent model sets `UPDATED_AT = null`.
+- **Indexes** (PROPOSAL, brief):
+  - `audit_logs_user_created_index (user_id, created_at)`: actor.
+  - `audit_logs_auditable_index (auditable_type, auditable_id)`: target.
+  - `audit_logs_action_created_index (action, created_at)`: action.
+  - `audit_logs_institute_created_index (institute_id, created_at)`: institute.
+- **FKs** (both RESTRICT, so an audited user or institute can never be hard-deleted):
+  - `audit_logs_user_fk (user_id) → users(id) ON DELETE RESTRICT`.
+  - `audit_logs_institute_fk (institute_id) → institutes(id) ON DELETE RESTRICT` (PROPOSAL).
+- **CHECKs:** none. Validity of the JSON is already enforced by the `JSON` type, and the action vocabulary lives in one code constant. A CHECK on the list would need a schema change for every new event.
+- **Rules** (PROPOSAL unless marked):
+  1. **Append-only, enforced by the application** for the sprint.
+     - A single `AuditLogger` service is the only writer, and it only ever INSERTs.
+     - The `AuditLog` model throws on `updating`/`deleting`.
+     - No code path updates or deletes audit rows.
+  2. **Same transaction as the business operation.**
+     - The audit insert runs inside the business operation's `DB::transaction`. If either fails, both roll back (VP-36).
+     - An audit row is never written for an operation that did not commit.
+  3. **Never in `old_values`/`new_values`, the log channel or exception context:**
+     - OTP codes or hashes, invitation codes or `code_hash` (contract §1.1, §13)
+     - passwords, `remember_token`, session IDs, CSRF or API tokens, `APP_KEY`-derived values
+     - **student personal data:** `full_name`, `date_of_birth`
+     - **full phone numbers**. A **masked** phone in the §9.1 format (`+9477*****67`) is allowed (Q27).
+
+     Snapshots use a **per-action allowlist**: UUIDs and IDs, status values, `relationship`, `is_primary`, masked phones, and business dates such as `linked_at`/`revoked_at`. They are never a raw model dump.
+  4. **`institute_id`** is the tenant the event belongs to, for example the student's managing institute for guardian events. It is NULL for platform-level events (Q32).
+  5. **`ip_address`** is stored raw in the sprint, with **restricted access**: no sprint endpoint exposes `audit_logs`, so it is readable only through direct database access. The retention period is an **unresolved pre-launch item** (pre-launch privacy review; Q28, D-015).
+  6. **`auditable_type`** values are stable short aliases fixed in one morph map (e.g. `institute`, `user_role`, `institute_staff`, `teacher_assignment`, `student_profile`, `guardian_invitation`, `student_guardian`). An alias is never renamed once written (Q35).
+  7. **Event vocabulary** (contract v0.3 §13): the 0.2 list plus `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended` and `student.created` (Q26).
+  8. **Primary-guardian changes** (Q37):
+     - Recorded inside the triggering event: `guardian_link.created` (initial primary) or `guardian_link.revoked` (promotion).
+     - The record holds `old_values.primary_link_id` and `new_values.primary_link_id`, which are internal `student_guardians` IDs (either may be `null`).
+     - No names, phones or other personal data. No separate event.
+- **Alternative considered — database triggers (not selected):**
+  - What they would do: `BEFORE UPDATE` and `BEFORE DELETE` triggers on `audit_logs` that `SIGNAL SQLSTATE '45000'` would make append-only a database guarantee.
+  - Why they aren't selected for the sprint:
+    1. With binary logging enabled (the MySQL 8.4 default), creating triggers may need privileges or settings (`log_bin_trust_function_creators`) that the restricted accounts in D-004 do not have. This would need verification.
+    2. Triggers are raw DDL outside Laravel's schema builder, and are easy to miss in reviews.
+    3. Removing `UPDATE`/`DELETE` privileges instead isn't possible with the current database-level grants.
+  - Approved: application-level enforcement for the sprint (Q33, D-015).
+
+## G4 — Students and guardianship
+
+### G4.1 `student_profiles`
+
+Purpose: an institute-managed student record (C6; contract §2.3, §8). The student user account is optional (`user_id` NULL). All demo data is fictional.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `managing_institute_id` | BIGINT UNSIGNED | No | — | FK `institutes.id`; set by the server from the route | Decided (contract §2.3, §8.1) |
+| `created_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; set by the server from the session | Decided (contract §2.3, §8.1); PROPOSAL NOT NULL |
+| `user_id` | BIGINT UNSIGNED | Yes | NULL | FK `users.id`; NULL in the sprint (§8.1); unique when set | Decided nullable (contract §2.3); PROPOSAL unique (draft) |
+| `full_name` | VARCHAR(255) | No | — | | Decided (contract §2.3, §8.1) |
+| `grade_id` | BIGINT UNSIGNED | No | — | FK `grades.id`; from `grade_code` (required) | Decided required (contract §8.1); PROPOSAL name (brief; draft `current_grade_id`) |
+| `medium_id` | BIGINT UNSIGNED | No | — | FK `mediums.id`; from `medium_code` (required) | Decided required (contract §8.1); PROPOSAL FK (brief; draft stored a code) |
+| `exam_target_id` | BIGINT UNSIGNED | Yes | NULL | FK `exam_targets.id`; optional | Decided optional (contract §8.1) |
+| `date_of_birth` | DATE | Yes | NULL | optional; fictional only | Decided optional (contract §8.1) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `student_profiles_uuid_unique (uuid)`.
+  - `student_profiles_user_id_unique (user_id)`. Multiple NULLs are allowed.
+  - `student_profiles_id_institute_unique (id, managing_institute_id)`. PROPOSAL (brief): the parent key for the composite FK from `guardian_invitations`.
+- **Indexes:** `student_profiles_institute_grade_index (managing_institute_id, grade_id)`. PROPOSAL: supports §8.2 listing and filtering, and the institute FK.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `student_profiles_institute_fk (managing_institute_id) → institutes(id)`.
+  - `student_profiles_created_by_fk (created_by_user_id) → users(id)`.
+  - `student_profiles_user_fk (user_id) → users(id)`.
+  - `student_profiles_grade_fk (grade_id) → grades(id)`.
+  - `student_profiles_medium_fk (medium_id) → mediums(id)`.
+  - `student_profiles_exam_target_fk (exam_target_id) → exam_targets(id)`.
+- **CHECKs:** none (no rule in an approved document).
+- **Soft deletes:** none. PROPOSAL, consistent with Q10. There is no student-removal, archive or status endpoint in the sprint (Q34).
+- **Derived, not stored:** `has_user_account` (`user_id IS NOT NULL`) and `active_guardian_count` (active links), both from the §8 shape.
+- **Not built:** `gender` (D-012 F2), `nic` and `school_id` (C6, contract §2.3), `deleted_at`.
+- **Note:** because of the composite FK, `managing_institute_id` cannot change while any `guardian_invitations` row references the student (`ON UPDATE NO ACTION`). There is no transfer flow in the sprint (PRODUCT_DECISIONS open item 4).
+
+### G4.2 `guardian_invitations`
+
+Purpose: a single-use, expiring code that lets a guardian link to a student (C6; contract §2.3, §9.1–§9.3).
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `student_id` | BIGINT UNSIGNED | No | — | part of the composite FK | Decided (contract §2.3) |
+| `institute_id` | BIGINT UNSIGNED | No | — | must equal the student's managing institute (composite FK) | Decided column (contract §2.3); PROPOSAL composite FK (brief) |
+| `invited_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id` | Decided (contract §2.3) |
+| `guardian_phone` | VARCHAR(20) | No | — | E.164 Sri Lankan mobile | Decided (contract §2.3, §9.1) |
+| `relationship` | VARCHAR(32) | No | — | `father\|mother\|guardian\|uncle\|aunt` | Decided (contract §9.1) |
+| `code_hash` | CHAR(64) | No | — | HMAC-SHA256 (hex) of the normalised code, keyed by the dedicated `GUARDIAN_INVITE_HMAC_KEY` (Q29); unique | Decided HMAC (contract §2.3); PROPOSAL dedicated key (contract v0.3), type and unique |
+| `status` | VARCHAR(32) | No | `'pending'` | `pending\|accepted\|revoked\|expired` | Decided (contract §2.3) |
+| `expires_at` | DATETIME | No | — | UTC; proposed 48 h after creation (configurable) | Decided (contract §2.3, §9.1) |
+| `accepted_at` | DATETIME | Yes | NULL | | Decided (contract §2.3) |
+| `accepted_by_user_id` | BIGINT UNSIGNED | Yes | NULL | FK `users.id`; the guardian who accepted | Decided (contract §2.3) |
+| `revoked_at` | DATETIME | Yes | NULL | | Decided (contract §2.3) |
+| `revoked_by_user_id` | BIGINT UNSIGNED | Yes | NULL | FK `users.id` | Decided (contract §2.3, §9.3) |
+| `pending_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status = 'pending', 1, NULL)` | PROPOSAL (brief) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `guardian_invitations_uuid_unique (uuid)`.
+  - `guardian_invitations_code_hash_unique (code_hash)`.
+  - `guardian_invitations_pending_unique (student_id, guardian_phone, pending_flag)`. One pending invitation per student and phone (contract §9.1 `409`); any number of finished ones.
+  - `guardian_invitations_id_student_unique (id, student_id)`. PROPOSAL (Q31): the parent key for the composite FK from `student_guardians`. It is logically redundant with the PK and exists only for that FK.
+- **Indexes:** `guardian_invitations_status_expires_index (status, expires_at)` (PROPOSAL, for a possible later expiry sweep; Q30). The FK indexes are created automatically.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `guardian_invitations_student_institute_fk (student_id, institute_id) → student_profiles(id, managing_institute_id)`. PROPOSAL (brief).
+    - This makes an invitation whose institute is not the student's managing institute impossible at the database level (VP-27).
+    - A separate single-column FK on `institute_id` is **not** added. The composite FK already guarantees the institute exists, through `student_profiles_institute_fk`.
+  - `guardian_invitations_invited_by_fk (invited_by_user_id) → users(id)`.
+  - `guardian_invitations_accepted_by_fk (accepted_by_user_id) → users(id)`.
+  - `guardian_invitations_revoked_by_fk (revoked_by_user_id) → users(id)`.
+- **CHECKs** (PROPOSAL):
+  - `guardian_invitations_status_chk CHECK (status IN ('pending','accepted','revoked','expired'))`.
+  - `guardian_invitations_relationship_chk CHECK (relationship IN ('father','mother','guardian','uncle','aunt'))`.
+  - `guardian_invitations_phone_format_chk CHECK (REGEXP_LIKE(guardian_phone, '^[+]947[0-9]{8}$', 'c'))`.
+  - `guardian_invitations_accepted_chk CHECK ((status = 'accepted' AND accepted_at IS NOT NULL AND accepted_by_user_id IS NOT NULL) OR (status <> 'accepted' AND accepted_at IS NULL AND accepted_by_user_id IS NULL))`.
+  - `guardian_invitations_revoked_chk CHECK ((status = 'revoked' AND revoked_at IS NOT NULL AND revoked_by_user_id IS NOT NULL) OR (status <> 'revoked' AND revoked_at IS NULL AND revoked_by_user_id IS NULL))`.
+  - `guardian_invitations_accept_before_expiry_chk CHECK (accepted_at IS NULL OR accepted_at <= expires_at)`.
+- **Application rules** (Decided where marked "contract"; otherwise PROPOSAL):
+  1. **Create** (§9.1; staff or admin of the managing institute). Everything runs in one transaction, plus the audit row:
+     - Lock the student row and the pending invitations for (student, phone) with `SELECT … FOR UPDATE`.
+     - Mark any pending invitation whose `expires_at` has passed as `expired`, which clears its `pending_flag`.
+     - If a non-expired pending invitation remains → `409` (contract).
+     - Generate the code (Q29):
+       - 8 characters drawn with a cryptographically secure source (`random_int`) from the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (30 symbols; no `0 O 1 I L U`; about 39 bits).
+       - Displayed as `XXXX-XXXX`.
+       - Store only `code_hash` = HMAC-SHA256(normalised code, `GUARDIAN_INVITE_HMAC_KEY`).
+       - On the very unlikely `code_hash` collision, retry with a new code.
+     - Insert the row with `institute_id` = the student's managing institute.
+     - Audit `guardian_invitation.created` **without** the code, hash or phone.
+     - The response returns the code **once**, with `Cache-Control: no-store` (contract).
+  2. **Accept** (§9.2; authenticated; throttled). All of the following run in **one transaction**:
+     - **Normalise the code** (Q29):
+       - Upper-case it and remove spaces and `-`.
+       - If the result is not exactly 8 characters from the alphabet, return the generic `422` without querying.
+       - Otherwise compute the HMAC and select the invitation by `code_hash` `FOR UPDATE`.
+     - Redemption is rate-limited (contract §9.2: proposed 5 attempts per user per 15 min; `429`).
+     - **Recheck under the lock:** status is `pending`, now < `expires_at`, the caller has `phone_verified_at` set, and the caller's phone equals `guardian_phone` (contract).
+       - If the invitation has expired, it is marked `expired`.
+       - Unknown, expired or used codes and phone mismatches all return one **generic `422`** (contract).
+     - If an active link already exists for this student and guardian → `409` (contract; also the DB unique key).
+     - Create `guardian_profiles` if missing (contract).
+     - **Lock the student row** (`SELECT … FOR UPDATE`). This serialises concurrent acceptances for the same student (Q25).
+     - Insert the `student_guardians` row with `linked_by_user_id` = **inviter**, `linked_at` = now, `invitation_id` (contract).
+       - `is_primary = 1` if the student has **no active primary** link; otherwise `0` (Q25).
+     - Set the invitation to `accepted` / `accepted_at` / `accepted_by_user_id`.
+     - Audit `guardian_invitation.accepted` and `guardian_link.created` (contract).
+     - Link creation and invitation consumption commit together or not at all.
+     - In `log` mode, `phone_verified_at` is **not** real phone verification (C6).
+  3. **Revoke** (§9.3): lock the row. Only `pending` → `revoked`, setting `revoked_at`/`revoked_by_user_id`; otherwise `409` (contract). Audited.
+  4. **Never log the plaintext code.** The accept request body and the create response are excluded from logs, audit rows and exception reports (contract §1.1).
+  5. **HMAC key** (Q29):
+     - `GUARDIAN_INVITE_HMAC_KEY` is a dedicated secret (32 random bytes, base64), read through config and kept only in local, ignored `.env` files. It is never committed, printed or logged; `.env.example` holds an empty placeholder.
+     - If it is missing, **only** invitation create and accept fail closed (`503`, contract v0.3 §9.1). It is resolved lazily when those services run, not validated at boot, so unrelated Artisan commands and endpoints keep working.
+     - Tests set a throwaway key at runtime; no key value is committed.
+     - Rotating the key invalidates all pending codes.
+  6. **Expiry is lazy** (Q30):
+     - No scheduler is required.
+     - On every read and action, an invitation is **effectively expired** when `expires_at <= now`, whatever its stored `status`. A stored `pending` never overrides an expired timestamp: responses show it as `expired`, accept gives the generic `422`, and revoke gives `409`.
+     - The stored status is moved to `expired` whenever a write path touches the row under lock (create, accept). That transition is what clears `pending_flag`.
+
+### G4.3 `student_guardians`
+
+Purpose: the guardian→student link. An **active** row (`revoked_at IS NULL`) is the only source of guardian access (D-011, contract §3). History is kept.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `student_id` | BIGINT UNSIGNED | No | — | FK `student_profiles.id` | Decided (canonical, contract §2.3) |
+| `guardian_id` | BIGINT UNSIGNED | No | — | FK `guardian_profiles.id`. Routes use the guardian's **user** UUID (§9.4), resolved through `guardian_profiles.user_id` | Decided (canonical) |
+| `relationship` | VARCHAR(32) | No | — | copied from the invitation; `father\|mother\|guardian\|uncle\|aunt` | Decided (contract §9.1, §9.5) |
+| `is_primary` | BOOLEAN (TINYINT(1)) | No | `0` | used by §11.2 `billed_guardian_id`; set **only** by the Q25 rules (first active link; promotion on revocation) | Decided concept (contract §11.2; canonical); PROPOSAL default and rules (D-015) |
+| `linked_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; the **inviter** (contract §9.2) | Decided (contract §2.3, §9.2) |
+| `linked_at` | DATETIME | No | — | UTC | Decided (contract §2.3) |
+| `revoked_by_user_id` | BIGINT UNSIGNED | Yes | NULL | FK `users.id` | Decided (contract §2.3, §9.4) |
+| `revoked_at` | DATETIME | Yes | NULL | UTC | Decided (contract §2.3, §9.4) |
+| `invitation_id` | BIGINT UNSIGNED | Yes | NULL | composite FK with `student_id` to `guardian_invitations(id, student_id)`; unique | Decided column (contract §2.3); PROPOSAL nullable, unique, composite FK (Q31) |
+| `active_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(revoked_at IS NULL, 1, NULL)` | PROPOSAL (brief) |
+| `primary_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(is_primary = 1 AND revoked_at IS NULL, 1, NULL)` | PROPOSAL (brief) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Generated columns** (declared in this order, after their base columns):
+  - `active_flag TINYINT UNSIGNED GENERATED ALWAYS AS (IF(revoked_at IS NULL, 1, NULL)) STORED`.
+  - `primary_flag TINYINT UNSIGNED GENERATED ALWAYS AS (IF(is_primary = 1 AND revoked_at IS NULL, 1, NULL)) STORED`.
+  - Neither base column has an FK, so the §0.C-3 limits don't apply.
+- **Unique:**
+  - `student_guardians_active_unique (student_id, guardian_id, active_flag)`. One **active** link per student and guardian (contract §2.3), with any number of revoked ones.
+  - `student_guardians_primary_unique (student_id, primary_flag)`. At most one **active primary** guardian per student. Revoking the primary link frees the slot automatically.
+  - `student_guardians_invitation_unique (invitation_id)`. One invitation creates at most one link. Multiple NULLs are allowed.
+- **Indexes:**
+  - `student_guardians_guardian_active_index (guardian_id, active_flag)`. PROPOSAL: supports §9.5 "my children" and per-request access checks; it also serves the `guardian_id` FK. The student-side lookups use the leftmost columns of the active unique key.
+  - `student_guardians_invitation_student_index (invitation_id, student_id)`. PROPOSAL (Q31): the child index for the composite invitation FK. MySQL needs the FK columns as the leading columns in that order; the single-column unique key on `invitation_id` does not qualify.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `student_guardians_student_fk (student_id) → student_profiles(id)`.
+  - `student_guardians_guardian_fk (guardian_id) → guardian_profiles(id)`.
+  - `student_guardians_linked_by_fk (linked_by_user_id) → users(id)`.
+  - `student_guardians_revoked_by_fk (revoked_by_user_id) → users(id)`.
+  - `student_guardians_invitation_student_fk (invitation_id, student_id) → guardian_invitations(id, student_id)`. PROPOSAL (Q31). This replaces a single-column FK on `invitation_id`.
+    - **Effect:** a link that names an invitation must belong to **that invitation's student**. A mismatch fails with 1452 (VP-43).
+    - **NULL behaviour:** MySQL implements `MATCH SIMPLE` semantics: a composite FK value that is all or partly NULL is not checked against the parent (MySQL 8.4 manual, "FOREIGN KEY Constraint Differences").
+      - A link with `invitation_id = NULL` is therefore accepted without an invitation. Its `student_id` is still checked by `student_guardians_student_fk`.
+      - The sprint has no flow that creates a link without an invitation; only fictional seed or test fixtures might (VP-44).
+    - The parent key is `guardian_invitations_id_student_unique`.
+- **CHECKs** (PROPOSAL, brief):
+  - `student_guardians_relationship_chk CHECK (relationship IN ('father','mother','guardian','uncle','aunt'))`.
+  - `student_guardians_is_primary_chk CHECK (is_primary IN (0, 1))`.
+  - `student_guardians_revocation_chk CHECK ((revoked_at IS NULL AND revoked_by_user_id IS NULL) OR (revoked_at IS NOT NULL AND revoked_by_user_id IS NOT NULL))`. Revocation actor and time are set together.
+  - `student_guardians_revoked_after_linked_chk CHECK (revoked_at IS NULL OR revoked_at >= linked_at)`.
+- **History rules** (Decided by C6 and contract §2.3, §9.4; PROPOSAL where marked):
+  - **Revoked links are never deleted and never reactivated.** No code path sets `revoked_at` back to NULL (application rule; a CHECK cannot compare old and new values).
+  - **Re-linking always creates a new row** through a new invitation. Revoked rows stay as history.
+  - This replaces the draft's unique `(student_id, guardian_id)` with reactivation, which would overwrite revocation history.
+  - **Revoke** (§9.4; institute admin or `super_admin`). Everything runs in one transaction:
+    - **Lock the student row first** (`SELECT … FOR UPDATE`), then the link row.
+    - Set `revoked_at` = now and `revoked_by_user_id`, which clears `active_flag` and `primary_flag`.
+    - Promote a new primary if needed (below).
+    - Audit `guardian_link.revoked`.
+  - **Access** is checked against an active row on **every request** (contract §3, §9.4: "lost immediately"). Nothing is cached in the session.
+  - **Primary guardian** (Q25, approved D-015; contract v0.3 §9.2, §9.4):
+    - **The student row is locked** (`SELECT … FOR UPDATE`, taken before any link row) for **every** primary-guardian creation, revocation and promotion. The student row is always locked first, so concurrent operations on the same student run one at a time and cannot deadlock.
+    - **First active guardian becomes primary.** On acceptance, with the student row locked, the new link gets `is_primary = 1` if the student has no active primary. `guardian_link.created` then records old primary link ID `null` and the new link's ID (Q37).
+    - **Promotion on revocation:**
+      - When the primary link is revoked, the same transaction (student row locked) first sets `revoked_at`, which frees `primary_flag`.
+      - It then sets `is_primary = 1` on the **oldest remaining active link**, ordered by `linked_at`, then `id`.
+      - `guardian_link.revoked` records the old primary link ID (the revoked link) and the new primary link ID (the promoted link, or `null`). These are internal IDs only, with no personal data (Q37).
+    - **No active guardian left** → the student has no primary, and new invoices get `billed_guardian_id = NULL` (contract §11.2).
+    - **Existing invoices keep** their original `billed_guardian_id` (snapshot).
+    - **No manual primary-selection API.** `is_primary` is never set from request input.
+    - The order (revoke, then promote) and the student-row lock prevent `student_guardians_primary_unique` conflicts and races (VP-41, VP-42).
+    - **Unchanged constraints:** `student_guardians_active_unique` and `student_guardians_primary_unique` stay the database backstops. Invitations remain **single-use**: `guardian_invitations.code_hash` is unique, `student_guardians_invitation_unique` allows one link per invitation, and the accept transaction moves the invitation to `accepted` under lock.
+  - **Billing access** (Q36, D-015; contract v0.3 §11.5, §11.6): any guardian with an **active** link may view the student's invoices and start a demo payment, whatever the invoice's `billed_guardian_id` (an immutable addressee snapshot). This covers the demo only; the real-money policy needs a separate pre-launch review.
+- **Not built:** `status` (redundant with `revoked_at`); `receives_attendance_sms`, `receives_payment_sms`, `receives_marks_notifications` (D-012 F3).
+
+## R2 migration order
+
+The R2 migrations are **appended after** `2026_10_29_000009`. The M1 migrations are not modified (append-only, D-014). Each FK points to an earlier table, and there are no cycles or deferred FKs.
+
+| # | Migration | Creates | FKs to |
+|---|---|---|---|
+| 12 | `2026_10_29_000010_create_audit_logs_table.php` | `audit_logs` | `users`, `institutes` |
+| 13 | `2026_10_29_000011_create_student_profiles_table.php` | `student_profiles` (+ `(id, managing_institute_id)` unique) | `institutes`, `users`, `grades`, `mediums`, `exam_targets` |
+| 14 | `2026_10_29_000012_create_guardian_invitations_table.php` | `guardian_invitations` (+ `pending_flag`, `(id, student_id)` unique, CHECKs) | `student_profiles` (composite), `users` |
+| 15 | `2026_10_29_000013_create_student_guardians_table.php` | `student_guardians` (+ `active_flag`, `primary_flag`, invitation index, CHECKs) | `student_profiles`, `guardian_profiles`, `users`, `guardian_invitations` (composite) |
+
+The filename prefix and sequence are a PROPOSAL, chosen so they sort after M1. As in Part 1, first runs happen only on the disposable `tuitionhub_test` (§0.B).
+
+## R2 validation plan (to run later — not executed)
+
+Cases are numbered after VP-26. "DB" cases are direct inserts asserting the MySQL code and constraint name; "Service" cases need the services or endpoints.
+
+| ID | Kind | Test | Expected |
+|---|---|---|---|
+| VP-27 | DB | Invitation whose `institute_id` is not the student's `managing_institute_id` | 1452 `guardian_invitations_student_institute_fk` |
+| VP-28 | DB + Service | Second **pending** invitation for the same student and phone; then again after the first is `expired`/`revoked`/`accepted` | 1062 `guardian_invitations_pending_unique` / API `409`; afterwards accepted |
+| VP-29 | DB + Service | Redeem the same invitation twice | API: second accept `422` (generic), only one link. DB: a second link with the same `invitation_id` → 1062 `student_guardians_invitation_unique` |
+| VP-30 | Service | Accept with a caller whose verified phone ≠ `guardian_phone`, or with `phone_verified_at` NULL | Generic `422`; no link; invitation stays `pending` |
+| VP-31 | DB + Service | Second **active** link for the same student and guardian | 1062 `student_guardians_active_unique` / API `409` |
+| VP-32 | DB | Several revoked links plus one active link for the same student and guardian | All accepted; history retained |
+| VP-33 | DB | Two active links with `is_primary = 1` for one student; then revoke one and add another primary | 1062 `student_guardians_primary_unique`; after the revocation, accepted |
+| VP-34 | Service | Revoke a link (§9.4), then the guardian's next request to §9.5, §10.5 and §11.4 | Student absent or `404` immediately; revoked row still present |
+| VP-35 | Service | Create and accept an invitation, then inspect `audit_logs` JSON and the log output | No code, `code_hash`, HMAC key, OTP, token, **full** phone, `full_name` or `date_of_birth` anywhere; a masked phone (`+9477*****67`) is allowed |
+| VP-36 | Service | Force a failure after the audit insert (and, separately, make the audit insert fail) inside a business transaction | Neither the business rows nor the audit row exist |
+| VP-37 | DB | Migrate R2 on `tuitionhub_test` (the VP-1 equivalent): composite FK, generated columns, and CHECKs on FK columns (`accepted_by_user_id`, `revoked_by_user_id`) | All created. Any MySQL error → stop and report |
+| VP-38 | DB | CHECK violations: relationship `other`; `is_primary = 2`; `revoked_at` without `revoked_by_user_id`; `revoked_at < linked_at`; `status = 'accepted'` without `accepted_at`; `accepted_at > expires_at`; bad `guardian_phone` | 3819 with the named CHECK |
+| VP-39 | Service | Accept an expired invitation | Generic `422`; invitation becomes `expired`; no link |
+| VP-40 | Service | Update or delete an `audit_logs` row through the model | Exception; row unchanged |
+| VP-41 | Service | Primary promotion: links A (oldest), B and C are active and A is primary; revoke A; then revoke B; then revoke C | After A: B is primary (ties on `linked_at` broken by `id`). After B: C is primary. After C: no primary. The revoke audit rows record each promotion; existing invoices keep their `billed_guardian_id` |
+| VP-42 | Service | Two acceptances for different guardians of the same student, run concurrently | Both links are created, and exactly one is primary (student-row lock); no `student_guardians_primary_unique` error reaches the caller |
+| VP-43 | DB | `student_guardians` row whose `invitation_id` belongs to a **different** student | 1452 `student_guardians_invitation_student_fk` |
+| VP-44 | DB | `student_guardians` row with `invitation_id = NULL` | Accepted (`MATCH SIMPLE`); `student_id` still checked by `student_guardians_student_fk` |
+| VP-45 | Service | `GUARDIAN_INVITE_HMAC_KEY` unset: create and accept an invitation; also run an unrelated endpoint and an Artisan command | Invitation endpoints `503` (fail closed); unrelated endpoint and command unaffected; the key never appears in output or logs |
+| VP-46 | Service | Code normalisation: accept `7kq2 m9xd` and `7KQ2-M9XD` for code `7KQ2M9XD`; then `7KQ2-M9X` and `0KQ2-M9XD` | The first two match. The malformed ones get the generic `422` with no database lookup |
+| VP-47 | Service | Invitation stored `pending` with `expires_at` in the past: read it, accept it, revoke it | Shown as `expired`; accept `422`; revoke `409`; a new invitation for the same student and phone succeeds (the old row is moved to `expired` under lock) |
+| VP-48 | Service | Q36 billing access: student with active links A (the billed guardian) and B, plus a revoked link C. B views the invoice and starts a demo payment; C tries both; then A is revoked and B tries again | B: `200`/`201`. C: `404`. After A's revocation, B can still view and pay; the invoice's `billed_guardian_id` is unchanged |
+| VP-49 | Service | Q37 audit content: the first acceptance (initial primary) and a primary revocation that promotes another link | `guardian_link.created` holds `primary_link_id` old `null` → new = the new link's ID. `guardian_link.revoked` holds old = the revoked link's ID → new = the promoted link's ID (or `null`). No names or phones in either row |
+
+## R2 decisions (D-015)
+
+All items were approved by Ranithu Shenal on 28/10/2026 (D-015). The two pre-launch items at the end remain **unresolved**.
+
+| # | Topic | Decision | Status |
+|---|---|---|---|
+| Q25 | Primary guardian selection | The first active guardian becomes primary. When the primary is revoked, the oldest remaining active link (`linked_at`, then `id`) is promoted in the same transaction. The **student row is locked** for creation, revocation and promotion. No active guardian → no primary. Existing invoices keep their `billed_guardian_id`. No manual primary-selection API (contract v0.3 §9.2, §9.4, §11.2) | **Approved (D-015)** |
+| Q26 | Additional audit events | `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended`, `student.created` (contract v0.3 §8.1, §13) | **Approved (D-015)** |
+| Q27 | Phones in audit snapshots | No full phone numbers; the masked form (`+9477*****67`) only | **Approved (D-015)** |
+| Q28 | `audit_logs.ip_address` | Raw IP in the sprint, with restricted access (no endpoint exposes audit rows) | **Approved (D-015)**; retention period **unresolved pre-launch item** |
+| Q29 | Invitation code | 8 characters from `23456789ABCDEFGHJKMNPQRSTVWXYZ`, secure random source, displayed `XXXX-XXXX`. Normalised by upper-casing and removing **spaces and hyphens** before HMAC-SHA256 with the dedicated `GUARDIAN_INVITE_HMAC_KEY`. A missing key fails closed (`503`) for invitation flows only. Redemption rate-limited; the key is never printed or committed | **Approved (D-015)** |
+| Q30 | Expiry | Lazy; no scheduler. Every read checks `expires_at`; a stored `pending` never overrides an expired timestamp | **Approved (D-015)** |
+| Q31 | Invitation/student integrity | Composite FK `(invitation_id, student_id)` → `guardian_invitations(id, student_id)`, with parent unique `guardian_invitations_id_student_unique` and child index `student_guardians_invitation_student_index`. A NULL `invitation_id` is not checked (`MATCH SIMPLE`) | **Approved (D-015)** |
+| Q32 | `audit_logs.institute_id` for platform events | May be NULL for platform-level events; otherwise the target's institute | **Approved (D-015)** |
+| Q33 | Append-only enforcement | Application-enforced for the sprint; no triggers | **Approved (D-015)** |
+| Q34 | Student removal | No student-removal, archive, status or soft delete in the sprint | **Approved (D-015)** |
+| Q35 | Audit target types | Stable short aliases (morph map), never class names; `auditable_*` NOT NULL | **Approved (D-015)** |
+| Q36 | Guardian billing access (demo) | **Any actively linked guardian** may view a student's invoice and start a demo payment, regardless of `billed_guardian_id` (contract v0.3 §11.5, §11.6, §15) | **Approved (D-015)** |
+| Q37 | Auditing primary changes | Recorded within `guardian_link.created` or `guardian_link.revoked`, with the old and new primary guardian-link IDs and no personal data | **Approved (D-015)** |
+| — | Audit IP retention period | Pre-launch privacy review | **Unresolved (pre-launch)** |
+| — | Real-money guardian billing policy | Separate pre-launch review; Q36 covers the demo only | **Unresolved (pre-launch)** |

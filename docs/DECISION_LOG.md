@@ -270,6 +270,38 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - **Observation:** `db:show` also lists the 22 `tuitionhub_test` tables, because `tuitionhub_app` still has access to `tuitionhub_test` (D-004). Revoking it is optional and has not been done.
 - **Pending:** none for M1.
 
+## D-015 — R2 decisions: audit log, guardianship and guardian billing access (Q25–Q37) — **APPROVED (2026-10-28)**
+
+- **Approved by:** Ranithu Shenal on 28/10/2026.
+- **Scope:**
+  - `docs/SPRINT_SCHEMA.md` Part 2 (R2): `audit_logs`, `student_profiles`, `guardian_invitations`, `student_guardians`.
+  - `docs/API_CONTRACT.md` v0.3.
+- **Implementation:** this approves the R2 specification and contract v0.3. Writing and running the R2 migrations is still a separate approved task (`CLAUDE.md` approval gate). Their first run happens only on `tuitionhub_test` (VP-37).
+- **Approved resolutions:**
+
+| # | Topic | Approved resolution | Contract v0.3 |
+|---|---|---|---|
+| Q25 | Primary guardian | The first active guardian becomes primary. When the primary is revoked, the oldest remaining active link (`linked_at`, then `id`) is promoted in the same transaction. **The student row is locked** during primary creation, revocation and promotion. No active guardian → no primary. Existing invoices keep `billed_guardian_id`. No manual primary-selection API | §2.3, §9.2, §9.4, §11.2 |
+| Q26 | Audit events | Added `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended`, `student.created` | §8.1, §13 |
+| Q27 | Phones in audit | No full phone numbers; masked form (`+9477*****67`) only | §13 |
+| Q28 | Audit IPs | Raw IP in the sprint, with restricted access (no endpoint exposes `audit_logs`). **The retention period stays pending a pre-launch privacy review** | §13 |
+| Q29 | Invitation codes | 8 characters from `23456789ABCDEFGHJKMNPQRSTVWXYZ`, secure random source, displayed `XXXX-XXXX`. **Normalisation upper-cases and removes spaces AND hyphens** before HMAC-SHA256 with the dedicated `GUARDIAN_INVITE_HMAC_KEY`. A missing key fails closed (`503`) for invitation flows only; unrelated commands are unaffected. Redemption is rate-limited; the key is never printed or committed | §2.3, §9.1, §9.2 |
+| Q30 | Expiry | Lazy, no scheduler. Every read checks `expires_at`; a stored `pending` never overrides an expired timestamp | §9.1, §9.3 |
+| Q31 | Invitation/student integrity | Composite FK `student_guardians (invitation_id, student_id)` → `guardian_invitations (id, student_id)`, with parent unique `guardian_invitations_id_student_unique` and child index `student_guardians_invitation_student_index`. A NULL `invitation_id` is not checked (`MATCH SIMPLE`) | schema only |
+| Q32 | Audit tenant | `institute_id` may be NULL for platform-level events | §13 |
+| Q33 | Append-only | Application-enforced for the sprint; no triggers | — |
+| Q34 | Student removal | No student-removal endpoint, status, archive or soft delete in the sprint | — |
+| Q35 | Audit targets | Stable short aliases (morph map), never class names | §13 |
+| Q36 | Guardian billing access | **Any actively linked guardian** may view a student's invoice and start a demo payment, **regardless of `billed_guardian_id`**. `billed_guardian_id` is only the immutable addressee snapshot. A revoked link grants nothing | §11.2, §11.5, §11.6, §15 |
+| Q37 | Auditing primary changes | Primary-guardian changes are recorded **within `guardian_link.created`** (initial primary) **or `guardian_link.revoked`** (promotion after revocation), with the **old and new primary guardian-link IDs**. No new event name and no personal data | §9.2, §9.4, §13 |
+
+- **Related contract change in v0.3:** §11.7 demo completion is atomic. It rejects already-paid invoices (`409`) and guarantees at most one `succeeded` payment and one commission accrual per invoice. This is worded as **demo payment completion**, because the contract has no settlement concept (C2).
+- **Still pending:**
+  - **Audit IP retention period:** pending a pre-launch privacy review.
+  - **Real-money guardian billing policy:** Q36 applies to the **demo** flow only. Who may pay when real money is collected (C2) needs a **separate pre-launch review** and is not decided here.
+  - **`GUARDIAN_INVITE_HMAC_KEY`:** to be added to local ignored `.env` files and as an empty placeholder in `.env.example` in the implementation task. It is never committed, printed or logged.
+- **Individual approver names:** recorded as supplied ("Approved by: Ranithu Shenal on 28/10/2026"). No other names were added.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
@@ -363,6 +395,7 @@ Notes on the table:
 
 - D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
 - D-013: the open schema questions Q19 (OTP details) and Q21 (lookup seed lists). VP-1 and Q20 are resolved (D-014).
+- D-015 (approved): the audit IP retention period (pre-launch privacy review) and the real-money guardian billing policy (separate pre-launch review).
 - "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.
