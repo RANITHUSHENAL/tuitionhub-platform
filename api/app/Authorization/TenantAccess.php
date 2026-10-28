@@ -88,6 +88,43 @@ class TenantAccess
     }
 
     /**
+     * Whether the account is active right now (re-read; suspended users are rejected with 403).
+     */
+    public function isActive(User $user): bool
+    {
+        return $this->isActiveUser($user);
+    }
+
+    /**
+     * The caller's stored user_roles rows only (contract §4.4); teacher and guardian never appear.
+     *
+     * @return Collection<int, UserRole>
+     */
+    public function storedRoles(User $user): Collection
+    {
+        return UserRole::query()
+            ->with(['role', 'institute'])
+            ->where('user_id', $user->getKey())
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * Active student_guardians links where the user is the guardian (contract §4.4).
+     */
+    public function activeChildLinkCount(User $user): int
+    {
+        if (! $this->isActiveUser($user)) {
+            return 0;
+        }
+
+        return StudentGuardian::query()
+            ->active()
+            ->whereHas('guardian', fn (Builder $guardian) => $guardian->where('user_id', $user->getKey()))
+            ->count();
+    }
+
+    /**
      * Re-read from the database: an in-memory model may be stale.
      */
     private function isActiveUser(User $user): bool

@@ -2,6 +2,7 @@
 
 namespace App\Models\Concerns;
 
+use App\Support\Instant;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 
@@ -27,6 +28,6 @@ trait SerializesUtcDates
 
     protected function serializeDate(DateTimeInterface $date): string
     {
-        return CarbonImmutable::instance($date)->utc()->format('Y-m-d\TH:i:s\Z');
+        return Instant::format($date);
     }
 }

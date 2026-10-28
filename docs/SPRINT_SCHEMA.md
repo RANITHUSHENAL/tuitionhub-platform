@@ -330,7 +330,7 @@ Purpose: one OTP login challenge (contract §4.1–§4.2). The code is stored as
 - **Attempt guard** (required of the OTP service; founder direction Q19):
   - Every attempt increment is a single guarded atomic update: `UPDATE otp_challenges SET attempts = attempts + 1, updated_at = ? WHERE id = ? AND consumed_at IS NULL AND attempts < max_attempts`.
   - 0 affected rows means "attempts exhausted or already consumed", so the request fails (`429`/`422`, contract §4.2).
-  - The CHECK is only a backstop. The guard keeps concurrent verifies from passing the limit. Other OTP details stay open (Q19).
+  - The CHECK is only a backstop. The guard keeps concurrent verifies from passing the limit. The other OTP details were settled in A1 (D-019); purging expired challenges stays deferred (Q19).
 - **Soft deletes:** none.
 - **Deviation:** the canonical and draft `otp_verifications` table is renamed and gains `max_attempts` and `last_sent_at` (contract §2.3).
 
@@ -624,7 +624,7 @@ Each item is a PROPOSAL or a gap that C1–C8, D-011/D-012 and contract v0.2 do 
 | Q16 | Staff add, no endpoint; no staff `uuid`; `position` values | Recorded under "Known sprint gaps"; seeders and tests only | Closed (founder direction) |
 | Q17 | `teacher_institute.uuid`; `revenue_share_pct` | Keep `uuid`; omit `revenue_share_pct` | Closed (founder direction) |
 | Q18 | Ending staff or teacher assignments, no endpoint | Recorded under "Known sprint gaps" | Closed (founder direction) |
-| Q19 | OTP details: `code_hash` method (the contract fixes HMAC-SHA256 only for invitations); `max_attempts` with no DB default; `last_sent_at` NOT NULL; resend = new challenge or update; purge of expired challenges | **Fixed now:** the service increments attempts only through a guarded atomic update, `… SET attempts = attempts + 1 WHERE id = ? AND consumed_at IS NULL AND attempts < max_attempts`, and treats 0 affected rows as "attempts exhausted". `otp_challenges_attempts_chk` is the backstop. The rest is decided in the OTP task. | **Open** |
+| Q19 | OTP details: `code_hash` method (the contract fixes HMAC-SHA256 only for invitations); `max_attempts` with no DB default; `last_sent_at` NOT NULL; resend = new challenge or update; purge of expired challenges | **Fixed now:** the service increments attempts only through a guarded atomic update, `… SET attempts = attempts + 1 WHERE id = ? AND consumed_at IS NULL AND attempts < max_attempts`, and treats 0 affected rows as "attempts exhausted". `otp_challenges_attempts_chk` is the backstop. **A1 (D-019):** `code_hash` = HMAC-SHA256 under `OTP_HMAC_KEY` over `uuid\|phone\|code`; `max_attempts` set by the service from config (5); `last_sent_at` always set; resend = new challenge, older pending ones expired. | **Resolved by D-019, except purge of expired challenges (deferred)** |
 | Q20 | Does MySQL 8.4.13 accept a CHECK on FK columns with explicit `ON DELETE RESTRICT`, or only with `ON DELETE` unset (`user_roles.role_scope`, `user_roles.institute_id`)? | **Explicit `ON DELETE RESTRICT` is accepted** with `user_roles_scope_chk` on MySQL 8.4 (VP-1, `tuitionhub_test`, 2026-10-28). No error; the fallback was not used (D-014). | **Resolved (VP-1)** |
 | Q21 | Full lookup seed lists (codes, English/Sinhala/Tamil names, `level`, `sort_order`, exam `year` and dates) | Founders to supply or approve; only the contract examples are fixed | **Open** |
 | Q22 | Lookup column details and their CHECKs | As proposed | Closed (founder direction) |

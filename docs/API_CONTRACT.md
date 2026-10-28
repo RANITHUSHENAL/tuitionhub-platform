@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.3 |
-| **Date** | 2026-10-28 (0.1: 2026-10-19; 0.2: 2026-10-28) |
+| **Version** | `v1` draft 0.4 |
+| **Date** | 2026-10-29 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
 | **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. |
@@ -24,12 +24,14 @@
 - The server derives all relationships, actor IDs and financial values (owner, marker, payer, inviter, amounts, commission). Client-supplied values for these are ignored or rejected.
 - Public routes use UUIDs only. Internal `bigint` IDs never appear in requests or responses.
 - OTP codes and guardian invitation codes are never logged, never written to audit rows, and never stored in plaintext.
-- Responses containing a one-time secret (§9.1) send `Cache-Control: no-store`.
+- **Every `/api/v1` response sends `Cache-Control: no-store, private`**, including errors and unmatched routes. This covers responses containing a one-time secret (§9.1).
 
 ### 1.2 Authentication (Sanctum SPA mode)
 
-- First-party SPA cookie/session authentication with Laravel Sanctum. No bearer tokens are issued in the sprint.
-- The SPA first calls `GET /sanctum/csrf-cookie` (Sanctum default route, outside `/api/v1`), then sends `X-XSRF-TOKEN` on state-changing requests with credentials included.
+- First-party SPA cookie/session authentication with Laravel Sanctum. No bearer tokens are issued in the sprint, and **bearer tokens are never accepted**: an `Authorization: Bearer …` header is ignored, so a request carrying only a bearer token is unauthenticated (`401`). There is no `personal_access_tokens` table.
+- **Stateful origin.** Session cookies and CSRF protection apply only to requests whose `Origin`/`Referer` host and port is listed in `SANCTUM_STATEFUL_DOMAINS` (`localhost:5173` in development). CORS allows only `FRONTEND_URL` (`http://localhost:5173` in development) with credentials. The SPA and API must both be addressed as `localhost`; `127.0.0.1` is a different origin and is not stateful.
+- The SPA first calls `GET /sanctum/csrf-cookie` (Sanctum default route, outside `/api/v1`), then sends `X-XSRF-TOKEN` on state-changing requests with credentials included. A stateful state-changing request with a missing or wrong token is rejected with **`419`** (`{"message":"CSRF token mismatch."}`) before the endpoint runs.
+- **Session endpoints are SPA-only.** `POST /auth/otp/verify` from a non-stateful client (no SPA `Origin`/`Referer`, e.g. curl or a mobile app) returns `403`, so a session can never be created outside CSRF protection. `POST /auth/logout` and `GET /auth/session` return `401` to non-stateful clients. `POST /auth/otp/request` creates no session and is available to any client.
 - The session ID is regenerated on login (§4.2) and invalidated on logout (§4.3).
 - **Permission labels** used below: `public` (no auth), `authenticated` (any logged-in active user), and the scoped roles defined in §3.
 
@@ -63,6 +65,16 @@ Errors (Laravel default shape):
 
 `errors` is present for `422`; other error codes return at least `message`.
 
+Business-rule errors carry a stable machine-readable `reason` code where the client needs to distinguish them:
+
+```json
+{ "message": "This role is already granted.", "reason": "role_already_granted" }
+```
+
+- **`409` state conflicts** always include `reason`. Codes defined so far: `role_already_granted`, `role_not_granted`, `owner_admin_revocation_forbidden`, `already_active`, `not_active`. Later endpoints add their own codes here.
+- **`403` `not_eligible`** includes `reason` (for example, onboarding prerequisites not met). Other `403`s return `message` only.
+- **Invalid values** detected by a business rule (unknown district, position or role, role/scope mismatch, invalid date) use the `422` `errors` shape above, keyed by the offending field, with no `reason`.
+
 ### 1.4 Status codes
 
 | Code | Meaning |
@@ -72,10 +84,12 @@ Errors (Laravel default shape):
 | `204` | No content |
 | `401` | Unauthenticated |
 | `403` | Authenticated and the resource is visible to the caller, but the action is not permitted |
-| `404` | Resource does not exist **or is hidden from the caller** (cross-tenant, unlinked child, private class). Never use `403` in a way that reveals a hidden resource exists. |
-| `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …) |
+| `404` | Resource does not exist **or is hidden from the caller** (cross-tenant, unlinked child, private class). Never use `403` in a way that reveals a hidden resource exists. The body is always `{"message":"Not found."}`; it never names a model class or identifier. |
+| `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …), with a `reason` code (§1.3) |
+| `419` | CSRF token missing or invalid on a stateful SPA request (§1.2). The SPA should fetch `/sanctum/csrf-cookie` again and retry once. |
 | `422` | Validation error |
 | `429` | Rate limited / attempts exhausted (`Retry-After` header set) |
+| `503` | A required service is unavailable or not configured (e.g. OTP driver or OTP key, §4.1; invitation key, §9.1). Fails closed; never degrades to an insecure fallback. |
 
 ### 1.5 Data types
 
@@ -207,15 +221,17 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
 ```
 
 - **Rules:**
-  - The response **never** contains the OTP code. The response is identical whether or not the phone belongs to an existing user.
-  - Code: random 6 digits, stored as a hash only. Driver `log` writes it to the local Laravel log; it refuses to run (fails closed, `503`) when `APP_ENV=production`. A failing SMS driver returns `503` and never falls back to `log`.
+  - The response **never** contains the OTP code. The response is identical whether or not the phone belongs to an existing user; the endpoint never reads `users`. Rate limits and cooldowns apply identically to registered and unregistered phones, so a `429` reveals nothing about registration.
+  - Code: random 6 digits from a secure random source. Stored only as `code_hash` = HMAC-SHA256 keyed by the dedicated secret `OTP_HMAC_KEY` over `"{challenge uuid}|{phone}|{code}"`, so a hash is bound to its challenge and phone. `request_ip_hash` is an HMAC of the client IP under the same key; the raw IP is not stored on the challenge. If `OTP_HMAC_KEY` is missing or shorter than 32 bytes, OTP request and verify fail closed with `503`; other endpoints are unaffected.
+  - Drivers: `log` (local development only) writes `DEV MODE — no SMS is sent. OTP for +9477*****67: 123456` to the dedicated `otp` log channel (`storage/logs/otp.log`) and nowhere else; `fake` is for automated tests only. Both refuse to run (fail closed, `503`, no challenge stored) when `APP_ENV=production`. An unknown or failing driver returns `503` and never falls back to `log`.
   - `meta.dev_mode` is `true` only when the `log` driver is active; the login UI shows `DEV MODE — no SMS is sent` only in that case.
-  - Proposed config defaults: expiry 5 min; resend cooldown 60 s; max 3 requests per phone per 15 min and 10 per IP per hour.
-- **Errors:** `422` invalid phone/purpose; `429` cooldown or rate limit (`Retry-After`); `503` OTP driver unavailable.
+  - **Resend:** a new request for the same phone and purpose creates a **new** challenge (new `challenge_id`) and, in the same transaction, expires all older pending challenges for that phone and purpose, so only the newest code works. Concurrent requests for one phone are serialised.
+  - **Limits (configured in `config/otp.php`):** expiry 5 min; resend cooldown 60 s after the last send (`429`, `Retry-After` = remaining seconds); max **3 requests per phone per 15 min**, **10 per phone per 24 h**, and **10 per IP per hour** (`429`, `Retry-After`). Requests rejected by a limit create no challenge and send no code.
+- **Errors:** `422` invalid phone/purpose; `429` cooldown or rate limit (`Retry-After`); `503` OTP driver or OTP key unavailable.
 
 ### 4.2 `POST /api/v1/auth/otp/verify`
 
-- **Permission:** `public`, throttled. Challenge must exist, match the phone, be unexpired, unconsumed and under its attempt limit.
+- **Permission:** `public`, throttled, **stateful SPA requests only** (non-stateful → `403`, §1.2). Challenge must exist, match the phone, be unexpired, unconsumed and under its attempt limit.
 - **Request:**
 
 ```json
@@ -245,19 +261,21 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
 ```
 
 - **Rules:**
-  - On success the challenge is consumed atomically, the session is regenerated and the user is logged in.
-  - If no user exists for the phone, a user is created with `name = null`, `phone_verified_at` set and no roles (`roles: []`, `teaching_at: []`, `active_child_link_count: 0`); `onboarding_required = true`.
+  - On success the challenge is consumed atomically and exactly once (a guarded update under a row lock), the session ID is regenerated (the pre-login session ID is never authenticated) and the user is logged in.
+  - If no user exists for the phone, a user is created with `name = null`, `phone_verified_at` set and no roles (`roles: []`, `teaching_at: []`, `active_child_link_count: 0`); `onboarding_required = true`. Concurrent first logins for one phone never create two users.
   - `roles`, `teaching_at` and `active_child_link_count` have the same meaning as in §4.4. These fields are display hints only; authorization is re-derived server-side on every request.
   - In `log` mode, `phone_verified_at` means "verified via local dev OTP" and must not be described as real phone verification.
-  - Proposed defaults: 5 attempts per challenge; 10 verify calls per IP per 10 min.
-- **Errors:** `422` wrong/expired/consumed code or mismatched phone (single generic message); `429` attempts exhausted or throttled.
+  - **Attempts:** each challenge allows **5** wrong codes. Every wrong code increments `attempts`, and the increment is committed **before** the `422` is returned. Once `attempts` reaches the limit the challenge is exhausted: every further verify, **including with the correct code**, returns `429` and the user must request a new code. The increment never exceeds the limit.
+  - **Suspended user:** a correct code for a `suspended` user still consumes the challenge, but returns `403` (`{"message":"This account is suspended."}`); no session is created and the user is not logged in.
+  - **Limit:** 10 verify calls per IP per 10 min (`429`, `Retry-After`).
+- **Errors:** `422` wrong/expired/consumed/superseded code, unknown challenge or mismatched phone (single generic message `The code is invalid or has expired.`, under `errors.code`); `403` suspended user, or non-stateful request; `419` CSRF; `429` attempts exhausted or throttled (`Retry-After`); `503` OTP key unavailable.
 
 ### 4.3 `POST /api/v1/auth/logout`
 
-- **Permission:** `authenticated`.
+- **Permission:** `authenticated`, stateful SPA requests only. Suspended users may log out (§3).
 - **Request:** none.
-- **Success `204`.** Session invalidated and CSRF token regenerated.
-- **Errors:** `401`.
+- **Success `204`.** Session invalidated and CSRF token regenerated (a new `XSRF-TOKEN` cookie is set).
+- **Errors:** `401` (including non-stateful and bearer-only requests); `419` CSRF.
 
 ### 4.4 `GET /api/v1/auth/session`
 
@@ -287,7 +305,7 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
   - `teaching_at`: one `{ institute_uuid, institute_name }` entry per **active** `teacher_institute` assignment. Ended assignments are excluded. It lists institutes, not classes: class access still requires being the class's assigned teacher (§3).
   - `active_child_link_count`: the number of **active** `student_guardians` links where the caller is the guardian. Revoked links are not counted.
   - These fields are display hints only; authorization is re-derived server-side on every request.
-- **Errors:** `401`.
+- **Errors:** `401` (including non-stateful and bearer-only requests); `403` suspended user.
 
 ---
 
@@ -1151,9 +1169,9 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | # | Method | Path | Permission |
 |---|---|---|---|
 | 4.1 | POST | `/api/v1/auth/otp/request` | public, throttled |
-| 4.2 | POST | `/api/v1/auth/otp/verify` | public, throttled |
-| 4.3 | POST | `/api/v1/auth/logout` | authenticated |
-| 4.4 | GET | `/api/v1/auth/session` | authenticated |
+| 4.2 | POST | `/api/v1/auth/otp/verify` | public, throttled, stateful SPA only |
+| 4.3 | POST | `/api/v1/auth/logout` | authenticated (incl. suspended), stateful SPA only |
+| 4.4 | GET | `/api/v1/auth/session` | authenticated, stateful SPA only |
 | 5.1 | POST | `/api/v1/institutes` | authenticated, onboarding-eligible |
 | 5.2 | GET | `/api/v1/institutes` | super_admin |
 | 5.3 | GET | `/api/v1/me/institutes` | authenticated |
@@ -1202,3 +1220,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 0.1 draft | 2026-10-19 | Initial sprint contract from approved decisions C1–C7 and OTP decision. Roles pending C8. |
 | 0.2 draft | 2026-10-28 | C8 approved: hybrid role model; derived teacher/guardian access; super_admin billing read-only. §3: teacher class access needs the class assignment; ended/revoked relationships grant nothing. §4.2/§4.4: `roles` holds stored roles only (`institute_uuid` null for `super_admin`); added `teaching_at` and `active_child_link_count` as display hints. §5.3: includes teaching institutes; `my_roles` renamed `my_access`. §6.2/§9.2: no teacher/guardian role rows. Index §5.4/§7.2: "member" replaced by "staff/admin" to match the endpoint sections. |
 | 0.3 draft | 2026-10-28 | **D-015 approved** (Ranithu Shenal, 2026-10-28). §2.3: dedicated `GUARDIAN_INVITE_HMAC_KEY` for `code_hash`; at most one active primary link per student. §8.1: `student.created` audited. §9.1: code generation (8 characters, unambiguous alphabet, secure random source, `XXXX-XXXX`), dedicated HMAC key (fail closed, `503`), lazy expiry checked on every read. §9.2: normalisation (upper-case, remove spaces and hyphens), authenticated phone match, initial primary under a student-row lock; no manual primary selection. §9.3: an expired invitation cannot be revoked (`409`). §9.4: atomic primary promotion after revocation, with old/new link IDs audited. §11.2: `billed_guardian_id` is an immutable addressee snapshot. §11.5/§11.6: any actively linked guardian may view an invoice and start a demo payment, regardless of `billed_guardian_id` (§15 labels updated). §11.7: atomic demo completion; already-paid invoices rejected; no double success or double accrual. §13: events `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended`, `student.created`; primary changes recorded in `guardian_link.created`/`guardian_link.revoked`; masked phones only; raw IP with retention pending pre-launch privacy review; stable target aliases. |
+| 0.4 draft | 2026-10-29 | **A1 SPA authentication and OTP (D-019).** §1.1: `Cache-Control: no-store, private` on every `/api/v1` response. §1.2: bearer tokens never accepted (`401`); stateful origin (`SANCTUM_STATEFUL_DOMAINS`) and CORS (`FRONTEND_URL`, credentials) defined; `419` on a missing or wrong CSRF token; verify is SPA-only (`403` otherwise), logout/session `401` to non-stateful clients. §1.3: `409` body `{message, reason}` with the defined reason codes; `403 not_eligible` carries `reason`; business-rule invalid values use the `422` `errors` shape. §1.4: added `419` and `503`; `404` body fixed to `{"message":"Not found."}`. §4.1: HMAC-SHA256 `code_hash` bound to challenge and phone under `OTP_HMAC_KEY` (missing or short key → `503`, OTP only); `log` driver writes only to the `otp` channel; `log`/`fake` fail closed in production; resend creates a new challenge and expires older pending ones; limits finalised (3 per phone per 15 min, 10 per phone per 24 h, 10 per IP per hour, 60 s cooldown), identical for registered and unregistered phones. §4.2: 5 attempts, increment committed before the `422`; exhausted challenges return `429` even for the correct code; exactly-once consumption; suspended user with a correct code → challenge consumed, `403`, no login; 10 verifies per IP per 10 min. §4.3: suspended users may log out; new CSRF token. §4.4: suspended → `403`. §15 labels updated. |

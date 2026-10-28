@@ -22,6 +22,7 @@ class ArchitectureTest extends TestCase
         'Models/Role.php',
         'Models/Institute.php',
         'Authorization/TenantAccess.php',
+        'Http/Presenters/AuthSessionPresenter.php',
         'Providers/AppServiceProvider.php',
     ];
 

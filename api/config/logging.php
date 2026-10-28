@@ -65,6 +65,14 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // OTP_DRIVER=log only (local development). The only place an OTP code may be written.
+        'otp' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/otp.log'),
+            'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),
