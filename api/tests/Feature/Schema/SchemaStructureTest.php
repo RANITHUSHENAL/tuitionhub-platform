@@ -94,9 +94,12 @@ class SchemaStructureTest extends TestCase
             'teacher_institute_status_chk', 'teacher_institute_status_left_chk', 'teacher_institute_dates_chk',
         ];
 
+        // Scoped to G1–G3; later groups are checked by their own structure tests.
         $actual = $this->column(
             "SELECT CONSTRAINT_NAME AS name FROM information_schema.TABLE_CONSTRAINTS
-              WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_TYPE = 'CHECK'"
+              WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_TYPE = 'CHECK'
+                AND TABLE_NAME IN ({$this->g1ToG3Placeholders()})",
+            self::G1_G3_TABLES,
         );
 
         $this->assertEqualsCanonicalizing($expected, $actual);
@@ -117,10 +120,12 @@ class SchemaStructureTest extends TestCase
             'teacher_institute_institute_fk' => 'institutes',
         ];
 
+        // Scoped to G1–G3; later groups are checked by their own structure tests.
         $rows = DB::select(
-            'SELECT CONSTRAINT_NAME AS name, REFERENCED_TABLE_NAME AS parent, DELETE_RULE AS on_delete, UPDATE_RULE AS on_update
+            "SELECT CONSTRAINT_NAME AS name, REFERENCED_TABLE_NAME AS parent, DELETE_RULE AS on_delete, UPDATE_RULE AS on_update
                FROM information_schema.REFERENTIAL_CONSTRAINTS
-              WHERE CONSTRAINT_SCHEMA = DATABASE()'
+              WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME IN ({$this->g1ToG3Placeholders()})",
+            self::G1_G3_TABLES,
         );
 
         $this->assertEqualsCanonicalizing(array_keys($expected), array_column($rows, 'name'));
@@ -165,9 +170,14 @@ class SchemaStructureTest extends TestCase
     /**
      * @return list<string>
      */
-    private function column(string $sql): array
+    private function column(string $sql, array $bindings = []): array
     {
-        return array_map(fn (object $row) => $row->name, DB::select($sql));
+        return array_map(fn (object $row) => $row->name, DB::select($sql, $bindings));
+    }
+
+    private function g1ToG3Placeholders(): string
+    {
+        return implode(', ', array_fill(0, count(self::G1_G3_TABLES), '?'));
     }
 
     private function dataType(string $table, string $column): ?string

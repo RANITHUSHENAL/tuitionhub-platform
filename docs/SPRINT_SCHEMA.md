@@ -708,6 +708,12 @@ Purpose: the immutable audit trail of contract §13 ("actor, target, old/new val
      - Recorded inside the triggering event: `guardian_link.created` (initial primary) or `guardian_link.revoked` (promotion).
      - The record holds `old_values.primary_link_id` and `new_values.primary_link_id`, which are internal `student_guardians` IDs (either may be `null`).
      - No names, phones or other personal data. No separate event.
+  9. **AuditLogger input rules** (future service; documented in M2, not implemented):
+     - **`user_agent`** is truncated to at most 512 characters before insert.
+     - **`ip_address`** is **never truncated**. A valid textual IPv4 or IPv6 address (including IPv4-mapped IPv6) fits in 45 characters.
+       - The IP must come from Laravel's request handling with **correctly configured trusted proxies**, never from a raw client-supplied header.
+       - It is validated as IPv4 or IPv6 with `filter_var($ip, FILTER_VALIDATE_IP)`, and a valid IP is stored **intact**.
+     - **An invalid or missing IP is never silently replaced** (no placeholder, no truncation, no guessed value). The handling policy (for example store NULL, or reject the operation) is **not yet decided** and must be approved before the AuditLogger is built (D-016).
 - **Alternative considered — database triggers (not selected):**
   - What they would do: `BEFORE UPDATE` and `BEFORE DELETE` triggers on `audit_logs` that `SIGNAL SQLSTATE '45000'` would make append-only a database guarantee.
   - Why they aren't selected for the sprint:
@@ -752,7 +758,7 @@ Purpose: an institute-managed student record (C6; contract §2.3, §8). The stud
 - **Soft deletes:** none. PROPOSAL, consistent with Q10. There is no student-removal, archive or status endpoint in the sprint (Q34).
 - **Derived, not stored:** `has_user_account` (`user_id IS NOT NULL`) and `active_guardian_count` (active links), both from the §8 shape.
 - **Not built:** `gender` (D-012 F2), `nic` and `school_id` (C6, contract §2.3), `deleted_at`.
-- **Note:** because of the composite FK, `managing_institute_id` cannot change while any `guardian_invitations` row references the student (`ON UPDATE NO ACTION`). There is no transfer flow in the sprint (PRODUCT_DECISIONS open item 4).
+- **Note:** because of the composite FK, `managing_institute_id` cannot change while any `guardian_invitations` row references the student (`ON UPDATE NO ACTION`). There is no transfer flow in the sprint (PRODUCT_DECISIONS open item 4). **Student-transfer limitation** (verified by VP-50e, D-016): moving a student to another institute is blocked at the database level while invitations exist. A future transfer feature needs its own approved design, and must not drop or weaken this FK.
 
 ### G4.2 `guardian_invitations`
 
@@ -782,7 +788,10 @@ Purpose: a single-use, expiring code that lets a guardian link to a student (C6;
   - `guardian_invitations_code_hash_unique (code_hash)`.
   - `guardian_invitations_pending_unique (student_id, guardian_phone, pending_flag)`. One pending invitation per student and phone (contract §9.1 `409`); any number of finished ones.
   - `guardian_invitations_id_student_unique (id, student_id)`. PROPOSAL (Q31): the parent key for the composite FK from `student_guardians`. It is logically redundant with the PK and exists only for that FK.
-- **Indexes:** `guardian_invitations_status_expires_index (status, expires_at)` (PROPOSAL, for a possible later expiry sweep; Q30). The FK indexes are created automatically.
+- **Indexes:**
+  - `guardian_invitations_student_institute_index (student_id, institute_id)`. The named child index for the composite FK `guardian_invitations_student_institute_fk`. Founder-approved in M2 (D-016), so MySQL does not create an unnamed index for that FK.
+  - `guardian_invitations_status_expires_index (status, expires_at)` (PROPOSAL, for a possible later expiry sweep; Q30).
+  - The single-column FK indexes (invited/accepted/revoked by) are created automatically by MySQL.
 - **FKs** (all `ON DELETE RESTRICT`):
   - `guardian_invitations_student_institute_fk (student_id, institute_id) → student_profiles(id, managing_institute_id)`. PROPOSAL (brief).
     - This makes an invitation whose institute is not the student's managing institute impossible at the database level (VP-27).
@@ -954,6 +963,10 @@ Cases are numbered after VP-26. "DB" cases are direct inserts asserting the MySQ
 | VP-47 | Service | Invitation stored `pending` with `expires_at` in the past: read it, accept it, revoke it | Shown as `expired`; accept `422`; revoke `409`; a new invitation for the same student and phone succeeds (the old row is moved to `expired` under lock) |
 | VP-48 | Service | Q36 billing access: student with active links A (the billed guardian) and B, plus a revoked link C. B views the invoice and starts a demo payment; C tries both; then A is revoked and B tries again | B: `200`/`201`. C: `404`. After A's revocation, B can still view and pay; the invoice's `billed_guardian_id` is unchanged |
 | VP-49 | Service | Q37 audit content: the first acceptance (initial primary) and a primary revocation that promotes another link | `guardian_link.created` holds `primary_link_id` old `null` → new = the new link's ID. `guardian_link.revoked` holds old = the revoked link's ID → new = the promoted link's ID (or `null`). No names or phones in either row |
+| VP-50 | DB | G4 FK violations and parent protection: (a) student parents must exist (6 FKs); (b) `student_profiles.user_id` is unique but may be NULL many times; (c) an institute with students cannot be deleted; (d) invitation actor users must exist (3 FKs); (e) a student's `managing_institute_id` cannot change while an invitation references it; (f) link parents must exist, and a linked student or guardian cannot be deleted | 1452 / 1062 `student_profiles_user_id_unique` / 1451, each with the named FK |
+| VP-51 | DB | `audit_logs` constraints: (a) structure: no `updated_at`/`deleted_at`, `created_at` NOT NULL with no default, JSON columns; (b) `created_at` required; (c) invalid JSON rejected; (d) actor and institute must exist; (e) an audited user cannot be deleted; (f) a system event with NULL actor and institute is accepted | (b) 1364 `created_at`; (c) 3140 `new_values`; (d) 1452 `audit_logs_user_fk` / `audit_logs_institute_fk`; (e) 1451 `audit_logs_user_fk`; (f) accepted |
+| VP-52 | DB | Two invitations with the same `code_hash` | 1062 `guardian_invitations_code_hash_unique` |
+| VP-53 | DB | Writing a generated column directly: (a) `guardian_invitations.pending_flag`; (b) `student_guardians.active_flag` and `primary_flag` | 3105, naming the column |
 
 ## R2 decisions (D-015)
 
@@ -976,3 +989,4 @@ All items were approved by Ranithu Shenal on 2026-10-28 (D-015). The two pre-lau
 | Q37 | Auditing primary changes | Recorded within `guardian_link.created` or `guardian_link.revoked`, with the old and new primary guardian-link IDs and no personal data | **Approved (D-015)** |
 | — | Audit IP retention period | Pre-launch privacy review | **Unresolved (pre-launch)** |
 | — | Real-money guardian billing policy | Separate pre-launch review; Q36 covers the demo only | **Unresolved (pre-launch)** |
+| — | AuditLogger handling of an invalid or missing IP | Must be decided before the AuditLogger is built; never silently substituted (R2.0 rule 9, D-016) | **Unresolved (before AuditLogger)** |

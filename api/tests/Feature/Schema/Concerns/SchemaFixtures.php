@@ -22,7 +22,15 @@ trait SchemaFixtures
 
     protected const ROW_IS_REFERENCED = 1451;
 
+    protected const MISSING_DEFAULT = 1364;
+
+    protected const INVALID_JSON = 3140;
+
+    protected const GENERATED_COLUMN_WRITE = 3105;
+
     private int $fixturePhoneSequence = 0;
+
+    private int $fixtureSequence = 0;
 
     protected function insertUser(array $overrides = []): int
     {
@@ -89,6 +97,94 @@ trait SchemaFixtures
         ], $this->timestamps(), $overrides));
     }
 
+    /**
+     * Lookup tables start empty in tests; values follow the contract examples.
+     */
+    protected function gradeId(string $code = 'G11'): int
+    {
+        return $this->lookupId('grades', $code, ['name' => 'Grade 11', 'level' => 'ol', 'sort_order' => 11]);
+    }
+
+    protected function mediumId(string $code = 'sin'): int
+    {
+        return $this->lookupId('mediums', $code, ['name' => 'Sinhala']);
+    }
+
+    protected function insertGuardianProfile(array $overrides = []): int
+    {
+        return DB::table('guardian_profiles')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'user_id' => $overrides['user_id'] ?? $this->insertUser(),
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function insertStudentProfile(int $instituteId, array $overrides = []): int
+    {
+        $this->fixtureSequence++;
+
+        return DB::table('student_profiles')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'managing_institute_id' => $instituteId,
+            'created_by_user_id' => $overrides['created_by_user_id'] ?? $this->insertUser(),
+            'full_name' => "Fictional Student {$this->fixtureSequence}",
+            'grade_id' => $overrides['grade_id'] ?? $this->gradeId(),
+            'medium_id' => $overrides['medium_id'] ?? $this->mediumId(),
+        ], $this->timestamps(), $overrides));
+    }
+
+    /**
+     * code_hash is a placeholder digest of a fixture label, not an HMAC of a real code.
+     */
+    protected function insertInvitation(int $studentId, int $instituteId, array $overrides = []): int
+    {
+        $this->fixtureSequence++;
+
+        return DB::table('guardian_invitations')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'student_id' => $studentId,
+            'institute_id' => $instituteId,
+            'invited_by_user_id' => $overrides['invited_by_user_id'] ?? $this->insertUser(),
+            'guardian_phone' => sprintf('+9471%07d', $this->fixtureSequence),
+            'relationship' => 'mother',
+            'code_hash' => hash('sha256', "fixture-{$this->fixtureSequence}"),
+            'status' => 'pending',
+            'expires_at' => now('UTC')->addHours(48),
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function insertGuardianLink(int $studentId, int $guardianId, array $overrides = []): int
+    {
+        return DB::table('student_guardians')->insertGetId(array_merge([
+            'student_id' => $studentId,
+            'guardian_id' => $guardianId,
+            'relationship' => 'mother',
+            'is_primary' => 0,
+            'linked_by_user_id' => $overrides['linked_by_user_id'] ?? $this->insertUser(),
+            'linked_at' => now('UTC'),
+            'invitation_id' => null,
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function revokeGuardianLink(int $linkId): void
+    {
+        DB::table('student_guardians')->where('id', $linkId)->update([
+            'revoked_at' => now('UTC'),
+            'revoked_by_user_id' => $this->insertUser(),
+        ]);
+    }
+
+    protected function insertAuditLog(array $overrides = []): int
+    {
+        return DB::table('audit_logs')->insertGetId(array_merge([
+            'user_id' => null,
+            'institute_id' => null,
+            'action' => 'student.created',
+            'auditable_type' => 'student_profile',
+            'auditable_id' => 1,
+            'created_at' => now('UTC'),
+        ], $overrides));
+    }
+
     protected function roleId(string $name): int
     {
         return (int) DB::table('roles')->where('name', $name)->value('id');
@@ -109,6 +205,13 @@ trait SchemaFixtures
         }
 
         $this->fail("Expected MySQL error {$mysqlCode} on {$constraint}, but the statement succeeded.");
+    }
+
+    private function lookupId(string $table, string $code, array $attributes): int
+    {
+        $id = DB::table($table)->where('code', $code)->value('id');
+
+        return (int) ($id ?? DB::table($table)->insertGetId(array_merge(['code' => $code], $attributes, $this->timestamps())));
     }
 
     /**

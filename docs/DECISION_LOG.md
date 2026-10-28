@@ -302,6 +302,66 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - **`GUARDIAN_INVITE_HMAC_KEY`:** to be added to local ignored `.env` files and as an empty placeholder in `.env.example` in the implementation task. It is never committed, printed or logged.
 - **Individual approver names:** recorded as supplied: Ranithu Shenal, 2026-10-28. No other approver names have been supplied for D-015, so none were added.
 
+## D-016 — M2 R2 migrations verified — **Verified by automated tests 2026-10-28**
+
+- **Scope:**
+  - The four R2 migrations from `docs/SPRINT_SCHEMA.md` Part 2 (D-015): `2026_10_29_000010_create_audit_logs_table`, `…000011_create_student_profiles_table`, `…000012_create_guardian_invitations_table`, `…000013_create_student_guardians_table`.
+  - Database-level tests in `api/tests/Feature/Schema/`.
+  - No M1 migration was changed (append-only, D-014).
+- **How it was run:**
+  - Only `php artisan test` from `api/`, under the D-010 guard. `RefreshDatabase` ran `migrate:fresh` on **`tuitionhub_test` only**.
+  - `migrate`, `migrate:fresh`, `db:seed` and `db:wipe` were never run directly. The `tuitionhub` development database was **not** touched, and no seeder was run.
+- **MySQL version:** **8.4.x**, asserted by `SchemaStructureTest` (`SELECT VERSION()` starts with `8.4.`). The patch version was not re-checked; D-003 recorded 8.4.13.
+- **VP-37 (R2 equivalent of VP-1): passed.** All 4 tables, 3 stored generated columns, 10 CHECKs, 19 approved named indexes and 17 FKs were created with **no MySQL error**.
+  - All 17 FKs use **explicit `ON DELETE RESTRICT`** with `ON UPDATE NO ACTION`.
+  - That includes FK columns that also appear in CHECKs: `guardian_invitations.accepted_by_user_id` and `revoked_by_user_id`, and `student_guardians.revoked_by_user_id`.
+  - The two composite FKs were created as approved:
+    - `guardian_invitations_student_institute_fk (student_id, institute_id) → student_profiles(id, managing_institute_id)`
+    - `student_guardians_invitation_student_fk (invitation_id, student_id) → guardian_invitations(id, student_id)`
+- **Additional named index (founder-approved, M2 Q3):** `guardian_invitations_student_institute_index (student_id, institute_id)` is the child index for the first composite FK, so MySQL does not create an unnamed one. It is recorded in `docs/SPRINT_SCHEMA.md` G4.2.
+- **Results:** `php artisan test` reports **88 passed (514 assertions)**, with 0 failed and 0 skipped. That is the 46 earlier tests plus **42 new** ones:
+
+  | Test file | New tests |
+  |---|---|
+  | `R2SchemaStructureTest` | 8 |
+  | `AuditLogConstraintsTest` | 5 |
+  | `StudentProfileConstraintsTest` | 3 |
+  | `GuardianInvitationConstraintsTest` | 12 |
+  | `StudentGuardianConstraintsTest` | 14 |
+
+  All 46 earlier tests still pass.
+- **Existing test change (M2 Q1):** in `SchemaStructureTest`, only the two whole-database assertions (all CHECK names; all FK names and rules) were limited to the G1–G3 tables. Their expected G1–G3 lists are unchanged. R2 is checked by `R2SchemaStructureTest`.
+- **MySQL error codes confirmed:**
+
+  | Code | Meaning |
+  |---|---|
+  | 1062 | duplicate key |
+  | 3819 | CHECK violated |
+  | 1452 | FK child has no parent |
+  | 1451 | FK parent still referenced |
+  | 1364 | required column missing |
+  | 3140 | invalid JSON |
+  | 3105 | write to a generated column |
+
+  Every test asserts both the error code and the constraint or column name.
+- **VP cases implemented (database level):**
+  - VP-27, VP-28 (DB part), VP-29 (DB part), VP-31 (DB part), VP-32, VP-33, VP-37, VP-38, VP-43, VP-44
+  - VP-50a–f, VP-51a–f, VP-52, VP-53a–b
+- **VP cases deferred** to the future services and endpoints (not counted as passing):
+  - VP-28 (service `409` and lazy expiry under lock), VP-29 (generic `422` on a second redemption), VP-30, VP-31 (API `409`), VP-34, VP-35, VP-36, VP-39, VP-40, VP-41, VP-42, VP-45, VP-46, VP-47, VP-48, VP-49.
+  - From Part 1: VP-9, VP-17–VP-22, VP-26, and the VP-24 canonical-spelling check.
+- **AuditLogger input rules** (documented in `docs/SPRINT_SCHEMA.md` R2.0 rule 9; not implemented):
+  - `user_agent` is limited to 512 characters.
+  - `ip_address` is **never truncated**. It is obtained through correctly configured trusted-proxy request handling, validated as IPv4 or IPv6 with `filter_var`, and stored intact when valid.
+    - The column is `VARCHAR(45)` (`R2SchemaStructureTest`), which holds any valid textual IPv4 or IPv6 address in full, so a valid IP never needs truncating.
+    - The validation and storage behaviour itself is a rule for the future AuditLogger. It is not yet implemented or tested.
+  - **Handling of an invalid or missing IP remains a proposed service decision.** It is not approved, and must be decided before the AuditLogger is built. An invalid IP is never silently substituted.
+- **Student-transfer limitation (verified by VP-50e):** `guardian_invitations_student_institute_fk` blocks any change to a student's `managing_institute_id` while an invitation references the student. There is no transfer flow in the sprint. A future transfer feature needs its own approved design and must not weaken this FK.
+- **Rule:** the M2 migrations are **append-only** once committed, like M1 (D-014).
+- **Pending:**
+  - Applying the M2 migrations to `tuitionhub` needs its own approval, with the same `db:show` and `migrate --pretend` preflight as M1.
+  - The invalid or missing IP handling decision for the AuditLogger.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
@@ -396,6 +456,7 @@ Notes on the table:
 - D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
 - D-013: the open schema questions Q19 (OTP details) and Q21 (lookup seed lists). VP-1 and Q20 are resolved (D-014).
 - D-015 (approved): the audit IP retention period (pre-launch privacy review) and the real-money guardian billing policy (separate pre-launch review).
+- D-016: separate approval to apply M2 to `tuitionhub`; the AuditLogger handling of an invalid or missing IP (proposed service decision).
 - "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.
