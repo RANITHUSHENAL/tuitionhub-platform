@@ -272,7 +272,7 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 
 ## D-015 — R2 decisions: audit log, guardianship and guardian billing access (Q25–Q37) — **APPROVED (2026-10-28)**
 
-- **Approved by:** Ranithu Shenal on 28/10/2026.
+- **Approved by:** Ranithu Shenal on 2026-10-28.
 - **Scope:**
   - `docs/SPRINT_SCHEMA.md` Part 2 (R2): `audit_logs`, `student_profiles`, `guardian_invitations`, `student_guardians`.
   - `docs/API_CONTRACT.md` v0.3.
@@ -300,7 +300,7 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - **Audit IP retention period:** pending a pre-launch privacy review.
   - **Real-money guardian billing policy:** Q36 applies to the **demo** flow only. Who may pay when real money is collected (C2) needs a **separate pre-launch review** and is not decided here.
   - **`GUARDIAN_INVITE_HMAC_KEY`:** to be added to local ignored `.env` files and as an empty placeholder in `.env.example` in the implementation task. It is never committed, printed or logged.
-- **Individual approver names:** recorded as supplied ("Approved by: Ranithu Shenal on 28/10/2026"). No other names were added.
+- **Individual approver names:** recorded as supplied: Ranithu Shenal, 2026-10-28. No other approver names have been supplied for D-015, so none were added.
 
 ## R1 design notes — not yet approved
 
