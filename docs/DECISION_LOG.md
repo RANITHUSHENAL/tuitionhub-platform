@@ -433,6 +433,37 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Not in S1:** `TeacherAssignmentService::assign`; the invitation, link and primary-guardian services (S2); HTTP middleware that fills `AuditContext` from requests; routes and API Resources (Day 1 Step 3, Sanctum, still pending); trusted-proxy configuration (needs a deployment target).
 - **Pending:** applying M2 to `tuitionhub` (D-016).
 
+## D-018 — Dependency security: Symfony Mime CVE-2026-45070 — **Patched and verified 2026-10-29**
+
+- **Decision:** patch `symfony/mime` **v8.1.7 → v8.1.10** with an isolated `composer update symfony/mime` (no `--with-dependencies`).
+  - Only `composer.lock` changed; `composer.json` is unchanged.
+  - A before/after comparison of all 110 locked packages shows **`symfony/mime` is the only version change**.
+- **Advisory:**
+  - **CVE-2026-45070**, "Email Header Injection via Non-Token Characters in Mime Parameter Names", severity **medium**.
+  - Packagist advisory `PKSA-wtxr-p26d-nn42`; sources GHSA-vqc8-7275-q272 and FriendsOfPHP `symfony/mime/CVE-2026-45070.yaml`.
+  - Composer reported it on 2026-10-28T18:08:54Z.
+- **Present before Sanctum:** `composer audit --locked` against the committed HEAD `composer.lock` (`a3e42cc`, before any Sanctum change) reported the same advisory. The A1 Sanctum install neither introduced nor changed it.
+  - The uncommitted Sanctum install was reverted (`git restore` of `composer.json` and `composer.lock`) before patching. Composer then removed `laravel/sanctum` from `vendor/` to match the lock.
+  - A1 restarts from a clean, patched baseline.
+- **Exposure:** the sprint has **no email flow** (no mail sending; SMS and mail are out of scope). The vulnerable path builds MIME header parameters from user input. The package is in the tree through `laravel/framework` and `symfony/mailer`.
+- **Conflicting public metadata, resolved by checking the source code:**
+  - **The two sources disagree:**
+    - symfony.com/cve-2026-45070 and GHSA (published 2026-05-20, updated 2026-05-27) list `>=8.0.0,<8.0.12` as affected and **8.0.12** as fixed.
+    - Packagist / FriendsOfPHP (2026-10-28) list `>=8.0.0,<8.1.0` and `>=8.1.0,<8.1.10` as affected, and **8.1.10** (plus 5.4.55, 6.4.49, 7.4.22) as fixed.
+  - **What the code shows:** the fix makes `Symfony\Component\Mime\Header\ParameterizedHeader::setParameters()` reject parameter **names** outside `TOKEN_REGEX`, throwing `RfcComplianceException`.
+    - **Installed v8.1.7:** no name validation; only values are checked.
+    - **v8.0.12:** no name validation either, despite being labelled "fixed".
+    - **v8.1.10:** has the name validation.
+  - The Packagist data matches the code; the May public metadata is outdated or incorrect.
+- **Verified:**
+  - `composer audit` → "No security vulnerability advisories found" (exit 0).
+  - `composer audit --locked` → the same (exit 0).
+  - `php artisan test` → **151 passed (795 assertions)**, all tests unchanged.
+- **Policy:** **every dependency change must pass `composer audit` (installed) and `composer audit --locked` before it is committed.**
+  - An advisory stops the work until it is resolved or explicitly accepted and recorded here.
+  - Version changes are compared package by package, and any unexpected change stops the work.
+- **Note:** the A1 plan referred to its future entry as "D-018". A1's entry will now be **D-019**.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
