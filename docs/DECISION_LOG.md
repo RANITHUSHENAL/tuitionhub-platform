@@ -360,7 +360,78 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Rule:** the M2 migrations are **append-only** once committed, like M1 (D-014).
 - **Pending:**
   - Applying the M2 migrations to `tuitionhub` needs its own approval, with the same `db:show` and `migrate --pretend` preflight as M1.
-  - The invalid or missing IP handling decision for the AuditLogger.
+  - The invalid or missing IP handling decision for the AuditLogger. *(Decided in D-017.)*
+
+## D-017 — S1 application foundations verified — **Verified by automated tests 2026-10-29**
+
+- **Scope:** Eloquent models, public UUIDs, UTC date handling, the morph map, `AuditLogger`, `RoleAssignmentService`, `InstituteService`, `StaffService`, `TeacherAssignmentService` and `TenantAccess`.
+  - No migrations, packages, routes, endpoints or Sanctum.
+  - The `tuitionhub` development database was not touched.
+  - Tests ran only through `php artisan test` (D-010 guard; `tuitionhub_test`).
+- **Results:** **151 passed (795 assertions)**, with 0 failed and 0 skipped. That is the 88 earlier tests plus **63 new** ones:
+
+  | Test file | New tests |
+  |---|---|
+  | `DistrictTest` | 4 |
+  | `PhoneMaskerTest` | 2 |
+  | `PublicUuidTest` | 5 |
+  | `DateSerializationTest` | 3 |
+  | `MorphMapTest` | 2 |
+  | `GeneratedColumnGuardTest` | 2 |
+  | `AuditLoggerTest` | 11 |
+  | `AuditLoggerTransactionGuardTest` | 1 |
+  | `AuditLogImmutabilityTest` | 1 |
+  | `RoleAssignmentServiceTest` | 7 |
+  | `InstituteServiceTest` | 5 |
+  | `StaffServiceTest` | 7 |
+  | `TeacherAssignmentServiceTest` | 3 |
+  | `TenantAccessTest` | 8 |
+  | `ArchitectureTest` | 2 |
+
+  All 88 earlier tests still pass.
+- **VP cases now covered:**
+  - VP-9, VP-17, VP-18, VP-19, VP-20, VP-21, VP-22, VP-26, VP-36, VP-40.
+  - New: VP-54 to VP-59, added to `docs/SPRINT_SCHEMA.md` Part 2.
+  - The VP-24 canonical-spelling part is complete via VP-59.
+  - VP-21's teacher part uses a fixture assignment until `TeacherAssignmentService::assign` exists.
+- **Decisions (approved for S1):**
+  1. **Public UUIDs:** a custom `HasPublicUuid` trait.
+     - It generates a random RFC 4122 v4 UUID with `Str::uuid()` in the separate `uuid` column, through Laravel's unique-ID insert hook. That hook runs even for `saveQuietly()`.
+     - It always overwrites any supplied value; updates throw; the route key is `uuid`; malformed values resolve to nothing without querying.
+     - `id` stays the `BIGINT` auto-increment key.
+     - Laravel's `HasUuids` (UUIDv7, applied to the primary key) and `HasVersion4Uuids` (timestamp-first COMB) were checked in the 13.38.0 source and rejected.
+  2. **UTC instants:** the `SerializesUtcDates` trait.
+     - Instants serialize as `YYYY-MM-DDTHH:MM:SSZ`, which closes the D-014 open item on microseconds.
+     - **PHP/Laravel time-zone correction (found during S1):** when Eloquent writes a `DateTime` that is not in UTC (for example `14:00` in Asia/Colombo), it formats the local wall-clock time and stores it as if it were UTC (`14:00Z` instead of `08:30Z`). `SerializesUtcDates::setAttribute()` now converts datetime-cast values to UTC before they are stored. VP-55 tests this.
+     - Calendar dates use `immutable_date:Y-m-d` casts and are never converted.
+  3. **Strict mode:** `Model::shouldBeStrict(! app()->isProduction())`.
+  4. **Morph map:** enforced with stable aliases (`AppServiceProvider`), so an unmapped audit target throws.
+  5. **AuditLogger:**
+     - It is insert-only: model hooks plus `AuditLogBuilder` refuse every Eloquent update or delete path. Raw `DB::table` writes remain a code-review rule (Q33).
+     - It must run inside the business transaction: outside one, it throws before any query.
+     - **A failed required audit insert propagates and rolls back the business operation.** Neither `AuditLogger` nor any caller catches it. Tested by forcing a database failure of the audit `INSERT` itself, which rolls back the business row.
+     - A failing IP warning (the log channel throws) is swallowed and never fails the business transaction.
+     - The denylist runs **before** the per-action allowlist and throws a `LogicException`. `institute.created` allows only `name`, `district`, `city` and `status`.
+     - The user agent is limited to 512 characters.
+  6. **Audit IP handling** (resolves D-016's pending item):
+     - No request → NULL, no warning.
+     - Missing or invalid IP from a request → NULL plus `Log::warning` without the raw value.
+     - The business transaction never fails, and valid IPs are stored intact.
+  7. **`RoleAssignmentService`** is the only writer of `user_roles`, enforced by `ArchitectureTest` (a source scan with comments stripped).
+     - **Architecture rule — no quiet model writes:** `saveQuietly()`, `updateQuietly()` and `withoutEvents()` are not allowed anywhere in `app/`, enforced by `ArchitectureTest`. They skip the model events that carry the UUID-immutability and generated-column guards. Audit logs are protected even without events, because `AuditLogBuilder` refuses every Eloquent update or delete path.
+     - `role_scope` always comes from `roles`, and role names must match exactly.
+     - A duplicate grant throws `ROLE_ALREADY_GRANTED`; only the `user_roles_user_role_scope_unique` violation (1062) is mapped to it.
+     - Revoking the owner's `institute_admin` throws `OWNER_ADMIN_REVOCATION_FORBIDDEN` (D-011).
+  8. **Lock order** shared by all services: `users` → `institutes` → `institute_staff` / `teacher_institute` → `user_roles`.
+     - Only existing rows are locked; inserts rely on the unique keys.
+  9. **`StaffService::end`** revokes the `institute_staff` role first. A missing role therefore throws `ROLE_NOT_GRANTED` with no partial change. A separate `institute_admin` role is untouched.
+  10. **`TenantAccess`** re-queries on every call, with no caching.
+      - Staff access needs both the role and an active staff row.
+      - Every institute-scoped check takes the institute explicitly.
+      - Suspended users are denied everywhere, re-read from the database. Institute suspension is left to the endpoint policies.
+  11. **District canonicalization** accepts `Moneragala` as an alias for `Monaragala`.
+- **Not in S1:** `TeacherAssignmentService::assign`; the invitation, link and primary-guardian services (S2); HTTP middleware that fills `AuditContext` from requests; routes and API Resources (Day 1 Step 3, Sanctum, still pending); trusted-proxy configuration (needs a deployment target).
+- **Pending:** applying M2 to `tuitionhub` (D-016).
 
 ## R1 design notes — not yet approved
 
@@ -456,7 +527,7 @@ Notes on the table:
 - D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
 - D-013: the open schema questions Q19 (OTP details) and Q21 (lookup seed lists). VP-1 and Q20 are resolved (D-014).
 - D-015 (approved): the audit IP retention period (pre-launch privacy review) and the real-money guardian billing policy (separate pre-launch review).
-- D-016: separate approval to apply M2 to `tuitionhub`; the AuditLogger handling of an invalid or missing IP (proposed service decision).
+- D-016: separate approval to apply M2 to `tuitionhub`. (The invalid or missing IP handling was decided in D-017.)
 - "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.

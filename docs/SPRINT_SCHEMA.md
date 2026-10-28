@@ -713,7 +713,12 @@ Purpose: the immutable audit trail of contract §13 ("actor, target, old/new val
      - **`ip_address`** is **never truncated**. A valid textual IPv4 or IPv6 address (including IPv4-mapped IPv6) fits in 45 characters.
        - The IP must come from Laravel's request handling with **correctly configured trusted proxies**, never from a raw client-supplied header.
        - It is validated as IPv4 or IPv6 with `filter_var($ip, FILTER_VALIDATE_IP)`, and a valid IP is stored **intact**.
-     - **An invalid or missing IP is never silently replaced** (no placeholder, no truncation, no guessed value). The handling policy (for example store NULL, or reject the operation) is **not yet decided** and must be approved before the AuditLogger is built (D-016).
+     - **An invalid or missing IP is never silently replaced** (no placeholder, no truncation, no guessed value).
+     - **Approved handling** (D-017; implemented in `App\Audit\AuditLogger`, tested by VP-57):
+       - **No request** (console, seeders, system events): `ip_address` is NULL, with no warning.
+       - **A request whose IP is missing or fails `filter_var`:** `ip_address` is NULL and `Log::warning('audit.ip_invalid')` is written. The warning carries only the action, the reason (`missing` or `invalid`) and the length, **never the raw value**.
+       - **This never fails the business transaction.**
+       - **A valid IPv4 or IPv6 address** is stored intact.
 - **Alternative considered — database triggers (not selected):**
   - What they would do: `BEFORE UPDATE` and `BEFORE DELETE` triggers on `audit_logs` that `SIGNAL SQLSTATE '45000'` would make append-only a database guarantee.
   - Why they aren't selected for the sprint:
@@ -967,6 +972,12 @@ Cases are numbered after VP-26. "DB" cases are direct inserts asserting the MySQ
 | VP-51 | DB | `audit_logs` constraints: (a) structure: no `updated_at`/`deleted_at`, `created_at` NOT NULL with no default, JSON columns; (b) `created_at` required; (c) invalid JSON rejected; (d) actor and institute must exist; (e) an audited user cannot be deleted; (f) a system event with NULL actor and institute is accepted | (b) 1364 `created_at`; (c) 3140 `new_values`; (d) 1452 `audit_logs_user_fk` / `audit_logs_institute_fk`; (e) 1451 `audit_logs_user_fk`; (f) accepted |
 | VP-52 | DB | Two invitations with the same `code_hash` | 1062 `guardian_invitations_code_hash_unique` |
 | VP-53 | DB | Writing a generated column directly: (a) `guardian_invitations.pending_flag`; (b) `student_guardians.active_flag` and `primary_flag` | 3105, naming the column |
+| VP-54 | Model | Public UUIDs (`HasPublicUuid`): `UserFactory` creates a random **v4** UUID; a supplied UUID is replaced, including on `saveQuietly()`; changing it throws; `id` stays an incrementing integer key; route key is `uuid`; malformed or numeric route values resolve to nothing **without a query**; `id` and internal FKs are not serialized | As described |
+| VP-55 | Model | Date serialization: instants render as `YYYY-MM-DDTHH:MM:SSZ` with no fractional seconds; an instant given in another zone (e.g. Asia/Colombo) is converted to UTC before it is stored and rendered; calendar dates render as `YYYY-MM-DD` | As described |
+| VP-56 | Model | Morph map: audit targets use the approved aliases (`institute`, `user_role`, `institute_staff`, `teacher_assignment`, `student_profile`, `guardian_invitation`, `student_guardian`); an unmapped model throws `ClassMorphViolationException` | As described |
+| VP-57 | Service | AuditLogger input rules: alias, actor and institute recorded; denylisted keys (codes, hashes, passwords, tokens, student name or DOB, full phones) throw **before** the allowlist filter and before any write; non-allowlisted keys dropped; an action without an allowlist refused; user agent limited to 512 characters; valid IPv4/IPv6 stored intact; invalid or missing IP from a request → NULL plus a warning without the raw value; no request → NULL with no warning | As described |
+| VP-58 | Model | Generated columns (`scope_key`, `active_flag`, `pending_flag`, `primary_flag`) are refused through Eloquent before any query; seeded roles are read-only | `LogicException`; database unchanged |
+| VP-59 | Service | District canonicalization: any casing or spacing returns the canonical spelling (`colombo` → `Colombo`); `Moneragala` is accepted as an alias for `Monaragala`; unknown districts are rejected; `InstituteService` stores the canonical value | Completes the VP-24 service part |
 
 ## R2 decisions (D-015)
 
@@ -989,4 +1000,4 @@ All items were approved by Ranithu Shenal on 2026-10-28 (D-015). The two pre-lau
 | Q37 | Auditing primary changes | Recorded within `guardian_link.created` or `guardian_link.revoked`, with the old and new primary guardian-link IDs and no personal data | **Approved (D-015)** |
 | — | Audit IP retention period | Pre-launch privacy review | **Unresolved (pre-launch)** |
 | — | Real-money guardian billing policy | Separate pre-launch review; Q36 covers the demo only | **Unresolved (pre-launch)** |
-| — | AuditLogger handling of an invalid or missing IP | Must be decided before the AuditLogger is built; never silently substituted (R2.0 rule 9, D-016) | **Unresolved (before AuditLogger)** |
+| — | AuditLogger handling of an invalid or missing IP | No request → NULL, no warning. Missing or invalid from a request → NULL plus a warning without the raw value. The business transaction never fails (R2.0 rule 9) | **Approved (D-017)** |
