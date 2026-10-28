@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -11,21 +12,26 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // docs/SPRINT_SCHEMA.md G2.1. Phone-only OTP login: no password reset table.
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
-            $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
+            $table->uuid('uuid')->unique('users_uuid_unique');
+            $table->string('name')->nullable();
+            $table->string('phone', 20)->unique('users_phone_unique');
+            $table->string('email')->nullable()->unique('users_email_unique');
+            $table->string('password')->nullable();
+            $table->dateTime('phone_verified_at')->nullable();
+            $table->string('status', 32)->default('active')->index('users_status_index');
             $table->rememberToken();
-            $table->timestamps();
+            $table->dateTime('created_at')->nullable();
+            $table->dateTime('updated_at')->nullable();
         });
 
-        Schema::create('password_reset_tokens', function (Blueprint $table) {
-            $table->string('email')->primary();
-            $table->string('token');
-            $table->timestamp('created_at')->nullable();
-        });
+        DB::statement("ALTER TABLE `users` ADD CONSTRAINT `users_status_chk` CHECK (`status` IN ('active', 'suspended'))");
+        DB::statement(<<<'SQL'
+            ALTER TABLE `users` ADD CONSTRAINT `users_phone_format_chk`
+                CHECK (REGEXP_LIKE(`phone`, '^[+]947[0-9]{8}$', 'c'))
+            SQL);
 
         Schema::create('sessions', function (Blueprint $table) {
             $table->string('id')->primary();
@@ -42,8 +48,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('users');
-        Schema::dropIfExists('password_reset_tokens');
         Schema::dropIfExists('sessions');
+        Schema::dropIfExists('users');
     }
 };

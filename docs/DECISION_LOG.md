@@ -200,6 +200,10 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - Approved by: TuitionHub founders on 2026-10-28.
 - **Decision:** `docs/SPRINT_SCHEMA.md` Revision 2, groups **G1–G3** (lookups and `roles`; `users`, `user_roles`, `otp_challenges`, `teacher_profiles`, `guardian_profiles`; `institutes`, `institute_staff`, `teacher_institute`), is the approved migration specification for those groups (`CLAUDE.md` source order, item 4).
 - **Verified (2026-10-28):** SHA-256 of the approved file: `f95a96ec6b148a2664708e61a4c15199770a9aef1333fc41d8bdfc58fda60089`.
+  - **Hash note:** this hash refers to the file as committed in `90e28d2`. Two edits have been made since, so the current file hash differs:
+    - The status line now reads "APPROVED (D-013) — Migration Specification".
+    - The Q20 outcome is recorded (D-014).
+  - No other specification content changed.
 - **Condition: VP-1.**
   - The G1–G3 migrations must first pass VP-1 on the disposable `tuitionhub_test` database only (`docs/SPRINT_SCHEMA.md` §0.B, §0.C). Only then may they run against `tuitionhub`.
   - If VP-1 rejects a form (CHECK on the CHECK-bearing `user_roles` FK columns, the composite role FK, `REGEXP_LIKE` or the district list in a CHECK), the affected design returns to the founders. It is never adapted silently.
@@ -210,10 +214,52 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - **Q21:** full lookup seed lists.
 - **Prerequisite carried forward:** `audit_logs` is first in R2. No role, institute or staff flow may run before it is migrated.
 - **Effect on earlier notes:** for G1–G3, `docs/SPRINT_SCHEMA.md` supersedes the "R1 design notes — not yet approved" below; for example, it uses explicit `dateTime()` rather than `datetimes()`. Those notes stay unapproved for later groups.
-- **Not yet updated** (separate approved edits needed):
-  - The `docs/SPRINT_SCHEMA.md` header still reads "DRAFT for founder review". This entry records its approval.
-  - `CLAUDE.md` item 4 still says "(not yet created)".
-- **Pending:** VP-1; Q19–Q21; individual approver names.
+- **Header updates:** done in the M1 change. The `docs/SPRINT_SCHEMA.md` status line now reads "APPROVED (D-013)", and `CLAUDE.md` item 4 no longer says "(not yet created)".
+- **Pending:** Q19 and Q21; individual approver names. VP-1 and Q20 are resolved in D-014.
+
+## D-014 — M1 G1–G3 migrations verified (VP-1) — **Verified 2026-10-28; awaiting founder review before commit**
+
+- **Scope:**
+  - The G1–G3 migrations from `docs/SPRINT_SCHEMA.md` (D-013), implemented as the edited skeleton `0001_01_01_000000_create_users_table.php` (`users` + `sessions`; no `password_reset_tokens`) plus `2026_10_29_000001` … `2026_10_29_000009`.
+  - Database constraint tests in `api/tests/Feature/Schema/`.
+- **How it was run:**
+  - Only `php artisan test` from `api/`, under the D-010 guard. `RefreshDatabase` ran `migrate:fresh` on **`tuitionhub_test` only**.
+  - `migrate`, `migrate:fresh`, `db:seed` and `db:wipe` were never run directly. The `tuitionhub` development database was not touched, and no seeder was run.
+- **VP-1: passed** on `tuitionhub_test` (2026-10-28).
+- **MySQL version:** **8.4.x** is what this run verified: `SchemaStructureTest` asserts that `SELECT VERSION()` starts with `8.4.`. The exact patch version was **not** re-verified here; D-003 recorded 8.4.13 on 2026-10-27.
+- **FK form (Q20):**
+  - `user_roles_role_scope_fk` and `user_roles_institute_fk` were created with **explicit `ON DELETE RESTRICT`**, and MySQL accepted them together with `user_roles_scope_chk`, with **no error**.
+  - `information_schema.REFERENTIAL_CONSTRAINTS` reports `DELETE_RULE = RESTRICT` and `UPDATE_RULE = NO ACTION` for all ten G1–G3 FKs.
+  - The approved fallback (unset `ON DELETE`) was **not used**, and the unset form was not tried.
+- **Results:** `php artisan test` reports **46 passed (190 assertions)**, with 0 failed and 0 skipped. That is 11 pre-existing tests plus 35 new ones; all pre-existing tests still pass.
+- **VP cases covered** (direct query-builder inserts, each asserting the MySQL error code and the constraint name):
+  - **VP-1**, in 8 structure tests:
+    - all tables present; `password_reset_tokens` absent
+    - `DATETIME` instants and `DATE` calendar columns
+    - `STORED GENERATED` `scope_key` (NOT NULL) and `active_flag`
+    - all 20 named CHECKs present
+    - all 10 FKs and their delete/update rules
+    - identical type, charset and collation for `roles.scope` and `user_roles.role_scope`
+    - exactly 3 seeded roles
+  - **VP-2 to VP-8.**
+  - **VP-10 to VP-16.**
+  - **VP-23 to VP-25.**
+  - VP-24 also documents that `'colombo'` passes `institutes_district_chk` (case-insensitive collation, `docs/SPRINT_SCHEMA.md` §0.1).
+- **Deferred to the service tasks:** VP-9, VP-17 to VP-22, VP-26, and the VP-24 check that the server stores the canonical district spelling.
+- **Companion changes:**
+  - `database/factories/UserFactory.php`: `uuid`, a fictional phone matching `^[+]947[0-9]{8}$`, `password` null, no `email_verified_at`.
+  - `database/seeders/DatabaseSeeder.php`: creates no default user. It was not run.
+  - `phpunit.xml`: forces `OTP_DRIVER=log` (`force="true"`). This has no effect until the OTP task adds `config/otp.php`.
+- **Rule:** no real SMS driver may ever be configured for testing. `phpunit.xml` forces the local `log` driver, and tests never send SMS.
+- **Rule — migrations are append-only from this commit:**
+  - Once committed, the G1–G3 migrations, including the edited skeleton `0001_01_01_000000_create_users_table.php`, are never edited.
+  - Any schema change goes into a new migration, with a matching approved update to `docs/SPRINT_SCHEMA.md`.
+- **Open item:** API date serialisation must match contract §1.5 (`"2026-10-19T08:30:00Z"`, no microseconds). Laravel's default output observed in VP-25 is `…T08:30:00.000000Z`. This must be fixed in the API resource / serialisation task.
+- **Not changed:**
+  - `app/Models/User.php`. It still casts `email_verified_at` and has `name`, `email` and `password` as fillable, which is harmless. It will be reviewed in the auth task.
+- **Pending:**
+  - Founder review and the commit.
+  - Running these migrations on `tuitionhub` still needs its own approval.
 
 ## R1 design notes — not yet approved
 
@@ -307,7 +353,8 @@ Notes on the table:
 ## Pending founder decisions
 
 - D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
-- D-013: VP-1 result, and the open schema questions Q19 (OTP details), Q20 (FK `ON DELETE` form, from VP-1) and Q21 (lookup seed lists).
+- D-013: the open schema questions Q19 (OTP details) and Q21 (lookup seed lists). VP-1 and Q20 are resolved (D-014).
+- D-014: founder review of the M1 migrations before commit; separate approval before migrating `tuitionhub`.
 - "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.

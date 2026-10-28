@@ -1,6 +1,6 @@
 # TuitionHub — Sprint Schema (migration specification)
 
-**Status:** DRAFT for founder review. Part 1 covers groups **G1–G3** only. This file becomes the migration specification **only after founder approval** (`CLAUDE.md` source order, item 4). Until then, nothing here may be migrated.
+**Status:** APPROVED (D-013) — Migration Specification. Part 1 covers groups **G1–G3** only (`CLAUDE.md` source order, item 4). Approval is conditional on VP-1: these migrations run first only on the disposable `tuitionhub_test` database (D-013).
 **Prepared:** 2026-10-28, branch `sprint/day1-api-scaffold`. **Revision 2** (2026-10-28) applies the founders' direction on Q1–Q24.
 **Sources, highest first:** `docs/PRODUCT_DECISIONS.md` (C1–C8) → `docs/DECISION_LOG.md` approved entries (D-005, D-011, D-012) → `docs/API_CONTRACT.md` v0.2 → this file → `docs/reference/TuitionHub_Sprint_Schema_Draft.md` and `docs/reference/TuitionHub_ER_Schema.md` (historical).
 
@@ -29,7 +29,7 @@ Every PROPOSAL is also listed under [Open questions](#open-questions).
 | 0.8 | Soft deletes (`deleted_at`) only where a table says so. **No G1–G3 table has soft deletes** (founder direction Q10). Disabling uses `status` where the table has one (`users.status = 'suspended'`, `institutes.status = 'suspended'`). Never soft-delete money or audit tables. | PROPOSAL (brief; founder direction Q10) |
 | 0.9 | "One active row" uniqueness: a nullable **STORED** generated `active_flag` (`1` when active, `NULL` otherwise) inside a unique index. MySQL lets a unique index hold any number of `NULL`s, so historical rows never collide. | Decided (contract §2.3) |
 | 0.10 | Simple invariants are enforced with `CHECK` constraints, in addition to Form Requests and services. | PROPOSAL (brief) |
-| 0.11 | FKs are `ON DELETE RESTRICT`, and `ON UPDATE` is left unset (MySQL default `NO ACTION`). **No `CASCADE`/`SET NULL`** on any column that feeds a generated column or a `CHECK`; MySQL forbids it (see §0.C). **Exception pending VP-1:** for FK columns that also appear in a `CHECK` (`user_roles.role_scope`, `user_roles.institute_id`), whether the FK may state `ON DELETE RESTRICT` explicitly, or must leave `ON DELETE` unset, is **unresolved** (§0.C-2). | PROPOSAL (brief, draft) |
+| 0.11 | FKs are `ON DELETE RESTRICT`, and `ON UPDATE` is left unset (MySQL default `NO ACTION`). **No `CASCADE`/`SET NULL`** on any column that feeds a generated column or a `CHECK`; MySQL forbids it (see §0.C). For FK columns that also appear in a `CHECK` (`user_roles.role_scope`, `user_roles.institute_id`), whether the FK could state `ON DELETE RESTRICT` explicitly was open (§0.C-2). **Resolved by VP-1 (D-014): explicit `ON DELETE RESTRICT` is accepted** on MySQL 8.4. | PROPOSAL (brief, draft); FK form verified (D-014) |
 | 0.12 | Constraint and index names are explicit and ≤ 64 characters, e.g. `user_roles_user_role_scope_unique`. | PROPOSAL (new) |
 
 ### 0.A DATETIME convention (instead of `timestamps()`)
@@ -66,7 +66,7 @@ Every PROPOSAL is also listed under [Open questions](#open-questions).
   - MySQL DDL commits implicitly, so a migration of `Schema::create` followed by `ALTER TABLE … ADD CONSTRAINT … CHECK` is **not atomic as a whole**.
   - If the `ALTER` fails, the table already exists, the migration is not recorded as run, and a re-run fails on "table already exists". Manual cleanup is then needed.
   - VP-1 (and any first run of these migrations) must therefore run **only on the disposable `tuitionhub_test` database** (D-010 guard), never on `tuitionhub`.
-- **Composite FK:** `$table->foreign(['role_id', 'role_scope'], 'user_roles_role_scope_fk')->references(['id', 'scope'])->on('roles');`. Whether to append `->restrictOnDelete()` (explicit `ON DELETE RESTRICT`) or leave `ON DELETE` unset (`NO ACTION`) is decided by VP-1 (§0.C-2).
+- **Composite FK:** `$table->foreign(['role_id', 'role_scope'], 'user_roles_role_scope_fk')->references(['id', 'scope'])->on('roles')->restrictOnDelete();`. VP-1 confirmed that MySQL 8.4 accepts the explicit `->restrictOnDelete()` here (§0.C-2, D-014).
 - **String FK columns:** `roles.scope` and `user_roles.role_scope` must have the **identical** type, character set and collation. MySQL requires the same charset and collation for nonbinary string FK columns. Declare both explicitly: `$table->string('scope', 32)->charset('utf8mb4')->collation('utf8mb4_unicode_ci')` and the same for `role_scope`, so a later change to the connection or table default cannot make them diverge.
 
 ### 0.C MySQL 8.4 limits these designs depend on (manual, verified 2026-10-28)
@@ -74,10 +74,10 @@ Every PROPOSAL is also listed under [Open questions](#open-questions).
 1. A `CHECK` may not reference other tables, subqueries, stored functions, variables or `AUTO_INCREMENT` columns. **It cannot read `roles.name` through `user_roles.role_id`.**
 2. "Foreign key referential actions (`ON UPDATE`, `ON DELETE`) are prohibited on columns used in `CHECK` constraints", and the reverse.
    - The manual does not say whether an **explicit** `ON DELETE RESTRICT`, as opposed to an omitted clause (which defaults to `NO ACTION`), counts as a prohibited referential action.
-   - **Nothing in this document claims that `restrictOnDelete()` is valid on a CHECK-bearing FK column.** In G1–G3 this affects only `user_roles.role_scope` (composite FK + `user_roles_scope_chk`) and `user_roles.institute_id` (FK + the same CHECK).
-   - **Unresolved — VP-1 detail (Q20):** VP-1 must try both forms on MySQL 8.4.13: explicit `ON DELETE RESTRICT`, and `ON DELETE` left unset (`NO ACTION`).
-     - If only the omitted form is accepted, these two FKs leave `ON DELETE` unset. InnoDB enforces `NO ACTION` like `RESTRICT`, rejecting the parent delete immediately.
-     - If neither form is accepted, the CHECK-based backstop is dropped and Q2 returns to the founders.
+   - Before VP-1, nothing in this document claimed that `restrictOnDelete()` was valid on a CHECK-bearing FK column. In G1–G3 this affects only `user_roles.role_scope` (composite FK + `user_roles_scope_chk`) and `user_roles.institute_id` (FK + the same CHECK).
+   - **Resolved by VP-1 (Q20, D-014, 2026-10-28):** MySQL 8.4 accepted both FKs with explicit `ON DELETE RESTRICT` together with `user_roles_scope_chk`, with no error. `information_schema` reports `DELETE_RULE = RESTRICT`, and VP-16 confirms that the parent delete is rejected (error 1451).
+     - The unset (`NO ACTION`) form was not needed and was not tried.
+     - The fallback this item originally planned for (leave `ON DELETE` unset, or drop the backstop) was not used.
 3. The base column of a **stored** generated column cannot have an FK with `CASCADE`, `SET NULL` or `SET DEFAULT`. An FK cannot reference a **virtual** generated column.
 4. A composite FK needs an index in the parent whose first columns are the referenced columns, in the same order. Referencing a non-unique index is deprecated, so a **unique** `(id, scope)` index is used.
 5. InnoDB checks constraints immediately; there are **no deferred FKs**. Insert order inside a transaction must therefore respect FK direction.
@@ -273,8 +273,8 @@ Purpose: **current-state** stored role grants: `super_admin` (global) and `insti
   - `user_roles_user_fk (user_id) → users(id) ON DELETE RESTRICT`.
   - `user_roles_institute_fk (institute_id) → institutes(id)`.
     - `institute_id` is the base of a stored generated column and is used in a CHECK, so this FK **must not** be `CASCADE`/`SET NULL` (§0.C).
-    - Explicit `ON DELETE RESTRICT` vs `ON DELETE` unset: **unresolved, VP-1** (§0.C-2).
-  - `user_roles_role_scope_fk (role_id, role_scope) → roles(id, scope)`. PROPOSAL (brief). This replaces a single-column FK on `role_id`. `role_scope` is used in the CHECK, so the same VP-1 question applies.
+    - `ON DELETE RESTRICT`, stated explicitly. VP-1 confirmed MySQL accepts it (§0.C-2, D-014).
+  - `user_roles_role_scope_fk (role_id, role_scope) → roles(id, scope) ON DELETE RESTRICT`. PROPOSAL (brief). This replaces a single-column FK on `role_id`. `role_scope` is used in the CHECK; VP-1 confirmed the explicit `RESTRICT` form (D-014).
 - **CHECK:** `user_roles_scope_chk CHECK ((role_scope = 'global' AND institute_id IS NULL) OR (role_scope = 'institute' AND institute_id IS NOT NULL))`. PROPOSAL (brief).
 - **Soft deletes:** none. Revoking a role **deletes the row**, and the deletion is audited. PROPOSAL (brief; see Q3).
 
@@ -625,7 +625,7 @@ Each item is a PROPOSAL or a gap that C1–C8, D-011/D-012 and contract v0.2 do 
 | Q17 | `teacher_institute.uuid`; `revenue_share_pct` | Keep `uuid`; omit `revenue_share_pct` | Closed (founder direction) |
 | Q18 | Ending staff or teacher assignments, no endpoint | Recorded under "Known sprint gaps" | Closed (founder direction) |
 | Q19 | OTP details: `code_hash` method (the contract fixes HMAC-SHA256 only for invitations); `max_attempts` with no DB default; `last_sent_at` NOT NULL; resend = new challenge or update; purge of expired challenges | **Fixed now:** the service increments attempts only through a guarded atomic update, `… SET attempts = attempts + 1 WHERE id = ? AND consumed_at IS NULL AND attempts < max_attempts`, and treats 0 affected rows as "attempts exhausted". `otp_challenges_attempts_chk` is the backstop. The rest is decided in the OTP task. | **Open** |
-| Q20 | Does MySQL 8.4.13 accept a CHECK on FK columns with explicit `ON DELETE RESTRICT`, or only with `ON DELETE` unset (`user_roles.role_scope`, `user_roles.institute_id`)? | Resolve in VP-1 on the disposable test database (§0.C-2) | **Open** |
+| Q20 | Does MySQL 8.4.13 accept a CHECK on FK columns with explicit `ON DELETE RESTRICT`, or only with `ON DELETE` unset (`user_roles.role_scope`, `user_roles.institute_id`)? | **Explicit `ON DELETE RESTRICT` is accepted** with `user_roles_scope_chk` on MySQL 8.4 (VP-1, `tuitionhub_test`, 2026-10-28). No error; the fallback was not used (D-014). | **Resolved (VP-1)** |
 | Q21 | Full lookup seed lists (codes, English/Sinhala/Tamil names, `level`, `sort_order`, exam `year` and dates) | Founders to supply or approve; only the contract examples are fixed | **Open** |
 | Q22 | Lookup column details and their CHECKs | As proposed | Closed (founder direction) |
 | Q23 | §0 conventions (`VARCHAR(32)` + CHECK, soft-delete policy, CHECKs, `RESTRICT`, constraint names) | As proposed, with the §0.11 VP-1 exception | Closed (founder direction) |
