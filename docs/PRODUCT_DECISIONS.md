@@ -2,7 +2,7 @@
 
 **Status:** Living register. Entries marked **Approved** are the source of truth for sprint planning.
 **Recorded:** 2026-10-19 (sprint start, Monday)
-**Supersedes:** the phase plans in `docs/reference/TuitionHub_Business_Plan.md`, `docs/reference/TuitionHub_Details.md` and the `[P1]/[P2]/[P3]` tags in `docs/reference/TuitionHub_ER_Schema.md` wherever they conflict with an approved decision below. C1–C7 are closed; do not reopen them without a new founder decision recorded here.
+**Supersedes:** the phase plans in `docs/reference/TuitionHub_Business_Plan.md`, `docs/reference/TuitionHub_Details.md` and the `[P1]/[P2]/[P3]` tags in `docs/reference/TuitionHub_ER_Schema.md` wherever they conflict with an approved decision below. C1–C8 are closed; do not reopen them without a new founder decision recorded here.
 
 Related: `docs/API_CONTRACT.md` (draft API), `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema).
 
@@ -97,6 +97,20 @@ Also in sprint:
 
 **Implications.** The prototype currently exposes `/study` and `/messages` in `studentNav` (`src/components/app/navConfig.tsx`) and routes them in `src/App.tsx`. Hiding these from active navigation is a separate frontend task — not done in this docs change.
 
+## C8 — Role model: `users.type` vs multi-role `user_roles` — **Approved (2026-10-28)**
+
+**Decision.** A hybrid role model, approved by Ranithu Shenal and Lahiru Kavya. Details and the decided questions are in `docs/DECISION_LOG.md` **D-011**.
+
+- **No `users.type` column** is built.
+- A custom `user_roles` table (no Spatie) holds **only** `super_admin`, `institute_admin` and `institute_staff`. Institute roles are scoped by `institute_id`.
+- The institute owner is `institutes.owner_user_id` and automatically receives `institute_admin` for that institute.
+- **Teacher access** comes from an active `teacher_institute` assignment, plus being the class's assigned teacher for class data. **Guardian access** comes from an active `student_guardians` link. Neither is a `user_roles` row, and ended or revoked relationships grant nothing.
+- Institute staff may create students, enrol them and invite parents. Only institute admins may create invoices. Revoking a guardian link stays admin-only (institute admin, or `super_admin`).
+- Teachers are assigned immediately by an admin; there is no teacher invitation or consent step in the sprint.
+- `super_admin` may read billing (invoices, payments, commission accruals) but may **not** create invoices or payment attempts.
+
+**Implications.** Role migrations (Day 1 plan group 3 onwards) and policies follow this model. `docs/API_CONTRACT.md` v0.2 draft is aligned with it.
+
 ---
 
 ## OTP approach — **Approved**
@@ -117,10 +131,6 @@ Every sprint deliverable must be demonstrable without any external account, API 
 
 ## Known unresolved follow-ups (not silently decided)
 
-### C8 — `users.type` vs multi-role `user_roles` — **Open, needs founder confirmation**
-
-The canonical schema has both a single `users.type` discriminator and per-institute `user_roles`. `docs/API_CONTRACT.md` **proposes** `user_roles` (scoped by `institute_id`) as authoritative for authorisation, with `users.type` dropped or treated as non-authoritative. Founder confirmation is required **before** final role migrations and policies are written. Until then, role/permission mappings in the API contract are proposals.
-
 ### C9 — Framework/runtime versions — **Environment verification, not a product decision**
 
 Laravel 13 / PHP 8.3+ / MySQL / Sanctum versions must be verified against the actual local environment and current official documentation before scaffolding. This is a technical check, not a scope decision.
@@ -132,6 +142,6 @@ Status (2026-10-27): Verified locally; one check pending (Windows PHP security b
 These are recorded so they are not silently decided; current proposals are in `docs/API_CONTRACT.md`.
 
 1. **Exams/marks screens.** Exams are excluded from the sprint API, but the prototype exposes Exams/Marks entries in parent, student, teacher and institute navigation. Whether to hide them or label them "coming soon" needs a decision before the frontend-connection task.
-2. **Teacher assignment consent.** The contract assigns an existing teacher profile to an institute immediately. Whether the teacher must accept (invitation flow) is open.
-3. **Who may bill / revoke.** Mapping of "billing staff" and "institute manager" onto the canonical roles is a proposal pending C8.
+2. **Teacher assignment consent — Resolved by C8 (2026-10-28).** An admin assigns a teacher immediately; no invitation or acceptance step in the sprint.
+3. **Who may bill / revoke — Resolved by C8 (2026-10-28).** Only institute admins (including the owner, who holds `institute_admin`) create invoices. Revoking guardian links stays admin-only (institute admin, or `super_admin`). `super_admin` may read billing but not create invoices or payment attempts. "Institute manager" keeps its contract meaning (§3).
 4. **Same child at two institutes.** Students are institute-managed records in sprint; cross-institute de-duplication/merge is deferred.

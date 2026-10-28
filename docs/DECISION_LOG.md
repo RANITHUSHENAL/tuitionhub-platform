@@ -137,8 +137,9 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Not supported:** `php artisan test --parallel`. Parallel testing renames the database per process (for example `tuitionhub_test_test_1`) **after** the guard has run, and the runner account has no rights to create those databases. Supporting it would need its own decision and guard change.
 - **Pending:** none.
 
-## D-011 — C8 role model — **Approved by founders (2026-10-27)**
+## D-011 — C8 role model — **Approved by founders (2026-10-27; open questions decided 2026-10-28)**
 
+- **Approved by:** Ranithu Shenal, Lahiru Kavya on 2026-10-28.
 - **Decision:** A hybrid role model. There is **no `users.type` column.**
 
 | Access | Source of truth |
@@ -152,23 +153,28 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - Institute staff **can** create students and invite parents (guardian invitations).
   - **Only institute admins** can create invoices.
   - Teachers are assigned to an institute **immediately** by an admin. There is no invite or acceptance step in the sprint.
+- **Decided (2026-10-28):**
+  1. **Owner gets admin.** The institute owner automatically receives `institute_admin` for their institute, server-assigned when the institute is created. So the owner can do everything an admin can, including creating invoices.
+  2. **`super_admin` billing is read-only.** `super_admin` may read invoices, payments and commission accruals. It may **not** create invoices or payment attempts.
+  3. **Custom `user_roles` table.** `user_roles` is a custom table; `spatie/laravel-permission` is not used.
+  4. **Enrolment and link revocation.** Institute staff **may** enrol students in classes. Revoking a guardian link stays **admin-only** (institute admin, or `super_admin`).
 - **Effect:** closes C8 and unblocks migration group 3 onwards in the approved Day 1 plan. The `user_roles` vocabulary is limited to the three roles above.
-- **Follow-ups (not done in this change; each needs its own approved edit):**
-  - `docs/PRODUCT_DECISIONS.md` still lists C8 as **Open**. Open items 2 (teacher assignment consent) and 3 (who may bill) are answered by this decision.
-  - `docs/API_CONTRACT.md` §3 is still marked "proposal pending C8". Two of its rules conflict with this decision and need a contract change with a changelog entry:
-    - §6.2 says a teacher assignment also creates a `teacher` role row in `user_roles`.
-    - §9.2 says accepting an invitation creates a global `guardian` role.
-  - Under this decision, teacher and guardian access come from `teacher_institute` and `student_guardians`, not from `user_roles`.
-- **Not decided by the founders (open questions):**
-  - Whether the owner also receives an `institute_admin` row for their institute. The contract proposes that they do; without it, an owner who is not an admin could not create invoices.
-  - Whether `super_admin` may create invoices. The contract's "billing user" does not include it.
-  - Whether `user_roles` is a custom table or `spatie/laravel-permission` with teams. "A `user_roles` table" suggests a custom table; this is not yet confirmed.
+- **Documents aligned (2026-10-28):**
+  - `docs/PRODUCT_DECISIONS.md`: C8 moved next to C1–C7 as **Approved**; open items 2 (teacher consent) and 3 (who may bill) marked resolved.
+  - `docs/API_CONTRACT.md` v0.2 draft:
+    - §3 is no longer a proposal. Ended or revoked relationships grant nothing.
+    - §6.2 no longer creates a `teacher` role row, and §9.2 no longer creates a global `guardian` role.
+    - `super_admin` is read-only on invoices and payments.
+    - §4.2/§4.4 `roles` lists stored roles only. Derived access is returned separately as `teaching_at` and `active_child_link_count`; these are display hints only.
+    - §5.3 includes teaching institutes and returns `my_access`.
+  - `CLAUDE.md`: the approval-gate example no longer names C8.
+- **Still open:** none.
 
 ---
 
 ## Pending founder decisions
 
-None at technical level. C8 was approved as D-011. The open questions listed under D-011 still need answers before the related policies are written.
+None at technical level. C8 was approved as D-011, and its open questions were decided on 2026-10-28.
 
 ## Not yet done from the approved Day 1 plan (status as of 2026-10-27)
 

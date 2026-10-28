@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.1 |
-| **Date** | 2026-10-19 |
+| **Version** | `v1` draft 0.2 |
+| **Date** | 2026-10-28 (0.1: 2026-10-19) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
-| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C7 and the OTP decision. Role mappings in §3 are **proposals pending C8**. |
+| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). |
 | **Schema source** | `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema), adapted as listed in §2. |
 
 > **Demo-money boundary.** Nothing in this contract moves real money. All payments are `provider: "mock"`, all commission rows are demo accruals, and there are no settlement, payout, refund-processing or live-gateway endpoints. See §11.
@@ -125,7 +125,7 @@ Settlements and payouts (`settlements`, `settlement_items`, `institute_bank_acco
 
 | Canonical | Sprint adaptation | Reason |
 |---|---|---|
-| `users.type` discriminator **and** `user_roles` | `user_roles` (with nullable `institute_id`) is authoritative for authorisation; `users.type` not used for permissions | Proposal pending **C8** |
+| `users.type` discriminator **and** `user_roles` | `users.type` is **not built**. A custom `user_roles` table (nullable `institute_id`) holds only `super_admin`, `institute_admin`, `institute_staff`. Teacher and guardian access are derived from `teacher_institute` and `student_guardians` (§3) | **C8 approved** |
 | `users.email` unique, `users.password` | `email` nullable; `password` nullable (OTP login only) | Phone-only OTP login |
 | `users.name` | Nullable until onboarding; `onboarding_required` is true while null | First OTP verify may create a user |
 | Partial unique indexes (`WHERE deleted_at IS NULL`, `WHERE withdrawn_on IS NULL`) | MySQL has no partial indexes. Use a nullable generated/flag column in the unique key (e.g. `active_flag` = `1` when active, `NULL` otherwise) | MySQL compatibility |
@@ -149,9 +149,20 @@ Settlements and payouts (`settlements`, `settlement_items`, `institute_bank_acco
 
 ---
 
-## 3. Roles and permission vocabulary — **proposal pending C8**
+## 3. Roles and permission vocabulary
 
-Roles are rows in `user_roles` (`user_id`, `role_id`, `institute_id` nullable). The permission labels used in this contract mean:
+This section implements approved C8 (`docs/PRODUCT_DECISIONS.md` C8; details in `docs/DECISION_LOG.md` D-011).
+
+- **`user_roles` holds only three roles:** `super_admin`, `institute_admin` and `institute_staff`. It is a custom table (`user_id`, `role_id`, `institute_id` nullable); no permissions package is used.
+- **Teacher and guardian access are derived from relationship tables, NOT from `user_roles`.** No `teacher` or `guardian` row is ever written to `user_roles`.
+  - **Teacher:** requires an active `teacher_institute` association with the institute **and**, for class data (sessions, rosters, attendance), being that class's assigned teacher (`classes.teacher_id`). An institute association alone does not open the institute's classes.
+  - **Guardian:** requires an active `student_guardians` link to that student.
+  - **Ended or revoked relationships grant nothing.** An ended assignment (`left_on` set, status `former`) or a revoked link (`revoked_at` set) is ignored, and access is lost on the next request.
+- **Institute staff** may create students (§8.1), enrol them (§8.3) and invite parents (§9.1). Revoking a guardian link (§9.4) stays with the institute admin or `super_admin`.
+- **`users.type` is not built.** No permission check reads a user-type column.
+- **`super_admin` is read-only on invoices and payments.** It may read invoices, payments and commission accruals (§11.3, §11.5, §11.8). It may **not** create invoices (§11.2), create payment attempts (§11.6) or complete demo payments (§11.7); those return `403`.
+
+The permission labels used in this contract mean:
 
 | Label | Definition |
 |---|---|
@@ -160,7 +171,7 @@ Roles are rows in `user_roles` (`user_id`, `role_id`, `institute_id` nullable). 
 | **Institute admin** | `institute_admin` role scoped to that institute. |
 | **Institute staff** | `institute_staff` role scoped to that institute with an active `institute_staff` row. |
 | **Institute manager** | Institute admin, or institute staff whose `institute_staff.position = manager`. |
-| **Billing user** | Institute admin. (Whether non-admin staff may bill is open — see `docs/PRODUCT_DECISIONS.md` open items.) |
+| **Billing user** | Institute admin of that institute (this includes the owner). Non-admin staff and `super_admin` are not billing users. |
 | **Assigned teacher** | User whose `teacher_profiles` row is the class's `classes.teacher_id` **and** has an active `teacher_institute` row for the class's institute. |
 | **Linked guardian** | User with a `guardian_profiles` row and an **active** `student_guardians` link (`revoked_at IS NULL`) to the student. Checked on every request; revocation takes effect immediately. |
 | **Same-institute** | The role's `institute_id` equals the target resource's institute. A role at Institute A grants nothing at Institute B. |
@@ -221,9 +232,12 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
       "name": "Nimal Perera",
       "phone": "+94771234567",
       "roles": [
-        { "role": "institute_admin", "institute_uuid": "uuid" },
-        { "role": "guardian", "institute_uuid": null }
-      ]
+        { "role": "institute_admin", "institute_uuid": "uuid" }
+      ],
+      "teaching_at": [
+        { "institute_uuid": "uuid", "institute_name": "Lakmina Academy" }
+      ],
+      "active_child_link_count": 1
     },
     "onboarding_required": false
   }
@@ -232,7 +246,8 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
 
 - **Rules:**
   - On success the challenge is consumed atomically, the session is regenerated and the user is logged in.
-  - If no user exists for the phone, a user is created with `name = null`, `phone_verified_at` set and no roles; `onboarding_required = true`.
+  - If no user exists for the phone, a user is created with `name = null`, `phone_verified_at` set and no roles (`roles: []`, `teaching_at: []`, `active_child_link_count: 0`); `onboarding_required = true`.
+  - `roles`, `teaching_at` and `active_child_link_count` have the same meaning as in §4.4. These fields are display hints only; authorization is re-derived server-side on every request.
   - In `log` mode, `phone_verified_at` means "verified via local dev OTP" and must not be described as real phone verification.
   - Proposed defaults: 5 attempts per challenge; 10 verify calls per IP per 10 min.
 - **Errors:** `422` wrong/expired/consumed code or mismatched phone (single generic message); `429` attempts exhausted or throttled.
@@ -254,9 +269,12 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
   "data": {
     "user": { "uuid": "uuid", "name": "Nimal Perera", "phone": "+94771234567", "status": "active" },
     "roles": [
-      { "role": "institute_admin", "institute_uuid": "uuid", "institute_name": "Lakmina Academy" },
-      { "role": "teacher", "institute_uuid": "uuid", "institute_name": "Lakmina Academy" }
+      { "role": "institute_admin", "institute_uuid": "uuid", "institute_name": "Lakmina Academy" }
     ],
+    "teaching_at": [
+      { "institute_uuid": "uuid", "institute_name": "Lakmina Academy" }
+    ],
+    "active_child_link_count": 0,
     "has_teacher_profile": true,
     "has_guardian_profile": false,
     "onboarding_required": false
@@ -264,6 +282,11 @@ Suspended users (`users.status = suspended`) are rejected with `403` on all auth
 }
 ```
 
+- **Fields:**
+  - `roles`: the caller's **stored** `user_roles` rows only, so `role` is one of `super_admin`, `institute_admin` or `institute_staff`. `institute_uuid` (and `institute_name`) is `null` for the global `super_admin` role and set for institute roles. `teacher` and `guardian` never appear here.
+  - `teaching_at`: one `{ institute_uuid, institute_name }` entry per **active** `teacher_institute` assignment. Ended assignments are excluded. It lists institutes, not classes: class access still requires being the class's assigned teacher (§3).
+  - `active_child_link_count`: the number of **active** `student_guardians` links where the caller is the guardian. Revoked links are not counted.
+  - These fields are display hints only; authorization is re-derived server-side on every request.
 - **Errors:** `401`.
 
 ---
@@ -317,12 +340,14 @@ Institute shape (`Institute`):
 
 ### 5.3 `GET /api/v1/me/institutes`
 
-- **Permission:** `authenticated`. Returns only institutes where the caller holds a scoped role.
+- **Permission:** `authenticated`. Returns only institutes where the caller holds a stored institute role (`institute_admin` or `institute_staff`) **or** has an active `teacher_institute` assignment. A global `super_admin` role does not list institutes here (see §5.2).
 - **Success `200`:** paginated
 
 ```json
-{ "data": [ { "institute": "Institute", "my_roles": ["institute_admin", "teacher"] } ], "meta": {} }
+{ "data": [ { "institute": "Institute", "my_access": ["institute_admin", "teacher"] } ], "meta": {} }
 ```
+
+- **Rules:** `my_access` lists the caller's applicable access labels for that institute: each stored institute role, plus `teacher` when the caller has an active assignment there. `teacher` does not grant general access to the institute's classes; class data still requires being the class's assigned teacher (§3). These fields are display hints only; authorization is re-derived server-side on every request.
 
 - **Errors:** `401`.
 
@@ -330,7 +355,7 @@ Institute shape (`Institute`):
 
 - **Permission:** same-institute manager/staff/admin, or `super_admin`. Public institute data is exposed only through the public catalogue (§7.5).
 - **Success `200`:** `{ "data": Institute }`
-- **Errors:** `401`, `404` (missing or not a member).
+- **Errors:** `401`, `404` (missing, or the caller is not same-institute staff/admin).
 
 ### 5.5 `PATCH /api/v1/institutes/{instituteUuid}`
 
@@ -408,7 +433,7 @@ Teacher shape (`Teacher`):
 }
 ```
 
-- **Rules:** Creates an active `teacher_institute` row and a `teacher` role scoped to the institute, in one transaction. Assignments are never deleted (ending one sets `left_on`/`former`; no end endpoint in sprint). Teacher consent flow is an open item.
+- **Rules:** Creates **only** an active `teacher_institute` row. No `user_roles` row is created; the teacher's access is derived from this active assignment (§3). The assignment takes effect immediately; there is no teacher invitation or consent step in the sprint (C8). Assignments are never deleted (ending one sets `left_on`/`former`; no end endpoint in sprint).
 - **Errors:** `401`, `403`, `404` (institute), `409` (already actively assigned), `422` (unknown teacher UUID).
 
 ### 6.3 `GET /api/v1/institutes/{instituteUuid}/teachers?status=&page=&per_page=`
@@ -660,7 +685,7 @@ Student shape (`Student`, institute view):
 }
 ```
 
-- **Rules:** In one transaction with the invitation row locked: invitation must be `pending` and unexpired; the caller's phone must have `phone_verified_at` set and equal `guardian_phone`. The invitation is marked `accepted` and an active `student_guardians` link is created (`linked_by_user_id` = inviter, `linked_at` = now, `invitation_id`). A `guardian_profiles` row and global `guardian` role are created if missing. Audited (`guardian_invitation.accepted`, `guardian_link.created`).
+- **Rules:** In one transaction with the invitation row locked: invitation must be `pending` and unexpired; the caller's phone must have `phone_verified_at` set and equal `guardian_phone`. The invitation is marked `accepted` and an active `student_guardians` link is created (`linked_by_user_id` = inviter, `linked_at` = now, `invitation_id`). A `guardian_profiles` row is created if missing. No role is created; guardian access is derived from the active `student_guardians` link (§3). Audited (`guardian_invitation.accepted`, `guardian_link.created`).
 - **Errors:** `401`; `422` for unknown/expired/used code **or** phone mismatch (single generic message); `409` if an active link already exists; `429`.
 
 ### 9.3 `POST /api/v1/guardian-invitations/{invitationUuid}/revoke`
@@ -862,7 +887,7 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 
 ### 11.2 `POST /api/v1/enrollments/{enrollmentUuid}/invoices`
 
-- **Permission:** billing user (§3) of the enrolment's institute.
+- **Permission:** billing user (§3) of the enrolment's institute. `super_admin` may not create invoices (`403`).
 - **Request:**
 
 ```json
@@ -875,7 +900,7 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 
 ### 11.3 `GET /api/v1/institutes/{instituteUuid}/invoices?status=&billing_period=&class_uuid=&student_uuid=&page=&per_page=`
 
-- **Permission:** billing user of that institute, or `super_admin`.
+- **Permission:** billing user of that institute, or `super_admin` (read-only).
 - **Success `200`:** paginated `Invoice[]` (without `items`).
 - **Errors:** `401`, `403`, `404`.
 
@@ -887,13 +912,13 @@ Invoice statuses in sprint: `open|paid|cancelled`.
 
 ### 11.5 `GET /api/v1/invoices/{invoiceUuid}`
 
-- **Permission:** billed guardian — any guardian with an **active** link to the invoice's student (proposal; `billed_guardian_id` is the addressee) — or billing user of the invoice's institute, or `super_admin`.
+- **Permission:** billed guardian — any guardian with an **active** link to the invoice's student (proposal; `billed_guardian_id` is the addressee) — or billing user of the invoice's institute, or `super_admin` (read-only).
 - **Success `200`:** `{ "data": Invoice & { "payments": [Payment] } }`
 - **Errors:** `401`, `404`.
 
 ### 11.6 `POST /api/v1/invoices/{invoiceUuid}/payment-attempts`
 
-- **Permission:** billed guardian (as §11.5).
+- **Permission:** billed guardian (as §11.5). `super_admin` and institute users may not create payment attempts (`403`).
 - **Request:**
 
 ```json
@@ -1070,7 +1095,6 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 
 - **Onboarding name capture.** `onboarding_required` can be `true`, but no listed endpoint sets `users.name`. A proposed `PATCH /api/v1/me` (`{ "name": "…" }`, `authenticated`) needs approval before it is added.
 - **Commission rule management.** No endpoint manages `commission_rules`; rules are seeded/configured in sprint.
-
 ---
 
 ## 15. Endpoint index
@@ -1084,14 +1108,14 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 5.1 | POST | `/api/v1/institutes` | authenticated, onboarding-eligible |
 | 5.2 | GET | `/api/v1/institutes` | super_admin |
 | 5.3 | GET | `/api/v1/me/institutes` | authenticated |
-| 5.4 | GET | `/api/v1/institutes/{instituteUuid}` | same-institute member, super_admin |
+| 5.4 | GET | `/api/v1/institutes/{instituteUuid}` | same-institute staff/admin, super_admin |
 | 5.5 | PATCH | `/api/v1/institutes/{instituteUuid}` | same-institute owner/admin, super_admin |
 | 6.1 | POST | `/api/v1/me/teacher-profile` | authenticated (self) |
 | 6.2 | POST | `/api/v1/institutes/{instituteUuid}/teacher-assignments` | same-institute owner/admin, super_admin |
 | 6.3 | GET | `/api/v1/institutes/{instituteUuid}/teachers` | same-institute staff/admin, super_admin |
 | 6.4 | GET | `/api/v1/me/teacher/classes` | authenticated teacher |
 | 7.1 | POST | `/api/v1/institutes/{instituteUuid}/classes` | same-institute owner/admin |
-| 7.2 | GET | `/api/v1/institutes/{instituteUuid}/classes` | same-institute member, super_admin |
+| 7.2 | GET | `/api/v1/institutes/{instituteUuid}/classes` | same-institute staff/admin, super_admin |
 | 7.3 | GET | `/api/v1/classes/{classUuid}` | public if active+public; else restricted |
 | 7.4 | PATCH | `/api/v1/classes/{classUuid}` | owning-institute admin, super_admin |
 | 7.5 | GET | `/api/v1/public/classes` | public |
@@ -1110,9 +1134,9 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 10.4 | GET | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin |
 | 10.5 | GET | `/api/v1/parents/me/children/{studentUuid}/attendance` | active guardian link |
 | 11.2 | POST | `/api/v1/enrollments/{enrollmentUuid}/invoices` | institute billing user |
-| 11.3 | GET | `/api/v1/institutes/{instituteUuid}/invoices` | institute billing user, super_admin |
+| 11.3 | GET | `/api/v1/institutes/{instituteUuid}/invoices` | institute billing user, super_admin (read-only) |
 | 11.4 | GET | `/api/v1/parents/me/invoices` | authenticated (active links) |
-| 11.5 | GET | `/api/v1/invoices/{invoiceUuid}` | billed guardian, billing user, super_admin |
+| 11.5 | GET | `/api/v1/invoices/{invoiceUuid}` | billed guardian, billing user, super_admin (read-only) |
 | 11.6 | POST | `/api/v1/invoices/{invoiceUuid}/payment-attempts` | billed guardian |
 | 11.7 | POST | `/api/v1/demo/payment-attempts/{paymentUuid}/complete` | payer; demo flag + non-production only |
 | 11.8 | GET | `/api/v1/admin/commission-accruals` | super_admin |
@@ -1127,3 +1151,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | Version | Date | Change |
 |---|---|---|
 | 0.1 draft | 2026-10-19 | Initial sprint contract from approved decisions C1–C7 and OTP decision. Roles pending C8. |
+| 0.2 draft | 2026-10-28 | C8 approved: hybrid role model; derived teacher/guardian access; super_admin billing read-only. §3: teacher class access needs the class assignment; ended/revoked relationships grant nothing. §4.2/§4.4: `roles` holds stored roles only (`institute_uuid` null for `super_admin`); added `teaching_at` and `active_child_link_count` as display hints. §5.3: includes teaching institutes; `my_roles` renamed `my_access`. §6.2/§9.2: no teacher/guardian role rows. Index §5.4/§7.2: "member" replaced by "staff/admin" to match the endpoint sections. |

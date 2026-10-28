@@ -4,7 +4,7 @@
 Build a secure, maintainable, working TuitionHub product for the Sri Lankan tuition industry. Use the approved product documents and existing repository as the source of truth.
 
 ## Sources of truth
-- `docs/PRODUCT_DECISIONS.md` — **source of truth for approved sprint scope** (C1–C7, OTP approach, no-external-blocker rule) and the register of open items (C8, C9, others). Approved decisions supersede older phase plans and conflicting descriptions.
+- `docs/PRODUCT_DECISIONS.md` — **source of truth for approved sprint scope** (C1–C8, OTP approach, no-external-blocker rule) and the register of open items (C9, others). Approved decisions supersede older phase plans and conflicting descriptions.
 - `docs/API_CONTRACT.md` — **draft** `/api/v1` contract, sprint table groups and documented schema adaptations. Changes to it need approval and a changelog entry.
 - `docs/reference/TuitionHub_ER_Schema.md` — **canonical starting schema**. Implement only the sprint subset and follow the adaptations in the API contract; never silently copy incompatible fields (e.g. 2% commission, settlement columns).
 - Reference/legacy only (not authoritative): `docs/reference/TuitionHub_ER_Schema (1).html`, Part II of `docs/reference/TuitionHub_Details.md`.
@@ -24,7 +24,7 @@ Build a secure, maintainable, working TuitionHub product for the Sri Lankan tuit
 
 ## Approval gate
 - Do not write application code, change architecture, scaffold Laravel, install packages, or create/run database migrations until the specific plan or task has been explicitly approved.
-- Do not resolve open items (e.g. C8 `users.type` vs `user_roles`) silently; record contradictions and questions in the open-items section of `docs/PRODUCT_DECISIONS.md` and ask.
+- Do not resolve open items (e.g. whether the prototype's Exams/Marks screens are hidden or labelled "coming soon") silently; record contradictions and questions in the open-items section of `docs/PRODUCT_DECISIONS.md` and ask.
 
 ## UI/UX boundaries
 - The existing MagicPattern frontend is a prototype with an established visual direction, not a frozen final product.
