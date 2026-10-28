@@ -170,11 +170,126 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - `CLAUDE.md`: the approval-gate example no longer names C8.
 - **Still open:** none.
 
+## D-012 — R0 schema reference review: resolutions — **APPROVED by founders (2026-10-28)**
+
+- Approved by: TuitionHub founders on 2026-10-28. Individual approver names pending documentation.
+- **Scope:** how the two schema references are used for sprint migrations. They are `docs/reference/TuitionHub_ER_Schema.md` (canonical, historical starting model) and `docs/reference/TuitionHub_Sprint_Schema_Draft.md` (column-level draft, written before C8 and contract v0.2). Both were reviewed in full on 2026-10-28. No credentials, keys or personal data were found. The documents themselves are not edited.
+- **Verified (2026-10-28):** SHA-256 of the committed reference files:
+  - ER schema (43,524 bytes): `65ca6b89a07e97b2b1028c823a710f224ab0a271e6e0ff66d0d6b4af633c3ade`
+  - Sprint draft (41,517 bytes): `8c53666af70b4d2ae8dc95ee3a5a5bfeaf2fe511f0a763175c7ffad8ff566eb5`
+
+### Resolutions
+
+| # | Topic | Decision |
+|---|---|---|
+| F1 | `users.phone` / `users.email` after soft delete | Plain unique keys. A soft-deleted account's phone or email is **not** reused in the sprint. No `active_flag` on `users`. |
+| F2 | `student_profiles.gender` | **Not built.** Less data is collected about minors (C6). |
+| F3 | `student_guardians.receives_attendance_sms`, `receives_payment_sms`, `receives_marks_notifications` | **Not built.** SMS is not a baseline dependency and marks are excluded. |
+| F4 | `class_sessions.substitute_teacher_id` | **Not built.** It would be a teacher access path that C8 does not define. |
+| F5 | `institute_settings` | **Table not built** in the sprint. `parent_pays_commission` and `platform_commission_pct` are never copied (C3). |
+| F6 | Schema reference documents | Committed unchanged. Precedence is recorded in `CLAUDE.md`, not by editing the references. |
+| F7 | Other `docs/reference/` files | Stay local and untracked: `TuitionHub_ER_Schema (1).html`, `TuitionHub_Business_Plan.md`, `TuitionHub_Details.md`, `TuitionHub_Claude_Workflow_Guide.md`, `TuitionHub_Setup_Guide.md`. `docs/SETUP_GUIDE.md` supersedes the legacy setup guide. |
+| — | `roles.guard_name` | **Not built.** There is no Spatie and no guard-based lookup (D-011). |
+| — | QR and card attendance fields | **Not built:** `class_enrollments.qr_token`, `class_enrollments.student_card_no`, and any device, geo or scan columns on `attendances`. |
+| — | Attendance method | **Manual attendance only** during the sprint (`attendances.method = manual`). |
+
+- **Pending:** individual approver names.
+
+## R1 design notes — not yet approved
+
+**Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
+
+**MySQL facts that shape the design (verified):**
+- A `CHECK` constraint cannot reference columns in other tables, subqueries or stored functions. It **cannot** check `roles.name` through `user_roles.role_id`.
+- `CHECK` constraints are prohibited on columns used in FK referential actions, and the reverse. A column in a `CHECK` must therefore have an FK with **no** `CASCADE`/`SET NULL`.
+- The base column of a **stored** generated column cannot have an FK with `CASCADE`, `SET NULL` or `SET DEFAULT` (on update or delete). An FK cannot reference a **virtual** generated column.
+- A generated column cannot use an `AUTO_INCREMENT` column. It may only reference generated columns defined earlier in the table.
+- A `UNIQUE` index permits multiple `NULL`s. This is why the "active" pattern below works: an inactive row has `NULL` in the flag and never collides.
+- `TIMESTAMP` only goes up to `2038-01-19 03:14:07` UTC and is converted through the session time zone. `DATETIME` and `DATE` are not converted.
+
+**Foreign keys:** any FK whose column feeds a generated column or a `CHECK` would have to use `RESTRICT` (`restrictOnDelete()`, no cascade). The contract already forbids hard deletes of teacher assignments and guardian links.
+
+**Generated columns and unique indexes.** In Laravel, write the generated columns with `->storedAs('…')` and declare them before the unique key.
+
+| Table | Generated column (all `STORED`) | Unique index | Source |
+|---|---|---|---|
+| `users` | — | `uuid`; `phone`; `email` (nullable) | F1 |
+| `roles` | — | `name` | D-011 |
+| `user_roles` | `scope_key BIGINT UNSIGNED AS (IFNULL(institute_id, 0))` — `0` never collides because ids start at 1 | `(user_id, role_id, scope_key)` | Sprint draft, compatible |
+| `institute_staff` | `active_flag TINYINT AS (IF(status = 'active', 1, NULL))` | `(institute_id, user_id, active_flag)` — **R1 proposal**; the contract does not state it | Contract §3 |
+| `teacher_institute` | `active_flag TINYINT AS (IF(status = 'active' AND left_on IS NULL, 1, NULL))` | `uuid`; `(teacher_id, institute_id, active_flag)` | Contract §6.2 (`409`) |
+| `student_guardians` | `active_flag TINYINT AS (IF(revoked_at IS NULL, 1, NULL))` | `(student_id, guardian_id, active_flag)` | Contract §2.3, C6 |
+| `guardian_invitations` | `pending_flag TINYINT AS (IF(status = 'pending', 1, NULL))` | `uuid`; `code_hash`; `(student_id, guardian_phone, pending_flag)` | Contract §9.1 (`409`) |
+| `class_enrollments` | `active_flag TINYINT AS (IF(status = 'active', 1, NULL))` | `uuid`; `(class_id, student_id, active_flag)` | Contract §8.3 |
+| `class_sessions` | — | `uuid`; `(class_id, session_date, start_time)` | Contract §10.1 |
+| `class_fee_versions` | — | `(class_id, effective_from)` | Contract §7.4 |
+| `attendances` | — | `(session_id, enrollment_id)` | Contract §2.3 |
+| `invoices` | `open_flag TINYINT AS (IF(status <> 'cancelled', 1, NULL))` | `uuid`; `(enrollment_id, billing_period, open_flag)` | Contract §11.2 |
+| `payments` | `pending_flag TINYINT AS (IF(status = 'pending', 1, NULL))` | `uuid`; `idempotency_key`; `(invoice_id, pending_flag)` | Contract §11.6 |
+| `platform_commissions` | — | `uuid`; `payment_id` | Contract §2.3 |
+| `boost_purchases` | — | `uuid`; `idempotency_key` | Contract §12.2 |
+| `otp_challenges` | — | `uuid` | Contract §2.3 |
+
+Notes on the table:
+- `teacher_institute` uses both columns in its flag. Add a `CHECK ((status = 'active' AND left_on IS NULL) OR (status = 'former' AND left_on IS NOT NULL))` so the two can never disagree.
+- `guardian_invitations` and `payments`: a row that is past its expiry but still `pending` keeps its flag. The service must mark it `expired` or `cancelled`, inside the same transaction and under a row lock, before it inserts the replacement. Otherwise the replacement gets a false `409`.
+- Unique indexes back up the transactions and row locks in contract §1.6. They do not replace them.
+
+**Role/scope consistency (`user_roles`).** `super_admin` must have `institute_id IS NULL`, and institute roles must have it set. A `CHECK` cannot see the role name, so R1 must choose an explicit strategy:
+- **Proposed minimum:** one backend service, `RoleAssignmentService`, is the only code that writes `user_roles`. It rejects role/scope mismatches and runs inside the institute-creation transaction to grant the owner `institute_admin`. Feature tests cover rejecting a scoped `super_admin` and an unscoped institute role. Seeders call the service.
+- **R1 proposal (optional, database-level backstop):**
+  - Add `roles.scope` (`global|institute`) with `UNIQUE (id, scope)`, and `user_roles.role_scope` with a composite FK `(role_id, role_scope) → roles(id, scope)` using `RESTRICT`.
+  - Add `CHECK ((role_scope = 'global' AND institute_id IS NULL) OR (role_scope = 'institute' AND institute_id IS NOT NULL))`.
+  - These add columns that neither the contract nor the draft has. Build them only if R1 approves them, and only after a migration test on MySQL 8.4.13 confirms it.
+
+**Historical rows must not keep granting access:**
+- Every authorization check goes through one shared "active" definition per table (a model scope used by Policies). Never check row existence alone.
+  - `teacher_institute`: `status = 'active' AND left_on IS NULL`.
+  - `institute_staff`: `status = 'active'`.
+  - `student_guardians`: `revoked_at IS NULL`.
+- Institute staff access needs **both** the `institute_staff` role in `user_roles` **and** an active `institute_staff` row (contract §3). Ending a staff row must remove the matching `user_roles` row in the same transaction. Otherwise a later new staff row would silently bring back old access.
+- Tests needed for each table: an ended assignment, a former staff row and a revoked link each return `403`/`404` on the next request, and a later new row grants access again.
+- **Open for R1:** whether removing a role hard-deletes the `user_roles` row (history kept in `audit_logs`) or adds an `active_flag` to it. The contract has no role-removal or staff-management endpoint in the sprint, so staff rows come from seeders only. Do not invent one.
+
+**Dates and times.** Do not default to `TIMESTAMP` for every date or time column.
+- **`DATE`** (calendar dates in `Asia/Colombo`, contract §1.5; never time-zone converted):
+  - `date_of_birth`, `joined_on`, `left_on`, `enrolled_on`, `withdrawn_on`
+  - `session_date`, `effective_from`, `effective_to`, `issued_on`, `due_on`
+- **`TIME`** (`Asia/Colombo` wall-clock time): `start_time`, `end_time`.
+- **`billing_period`** (`"YYYY-MM"` in the API): **open for R1.** Either `CHAR(7)` with a `CHECK` on the format, or a `DATE` holding the first day of the month.
+- **Instants** (UTC; D-005): `created_at`, `updated_at`, `deleted_at`, `expires_at`, `consumed_at`, `last_sent_at`, `linked_at`, `revoked_at`, `accepted_at`, `paid_at`.
+  - **R1 proposal:** use `DATETIME` (`datetimes()`, `softDeletesDatetime()`, `dateTime()`) rather than Laravel's default `TIMESTAMP`. This avoids the 2038 limit and any dependence on the session time zone.
+  - The app writes UTC, because the app time zone is UTC.
+
+**Migration dependencies.** Each table depends only on earlier ones:
+
+| Order | Tables | Depends on |
+|---|---|---|
+| 0 | `users` (edited default migration), `password_reset_tokens`, `sessions`, `cache`, `jobs` | — |
+| 1 | `subjects`, `grades`, `streams`, `exam_targets`, `mediums`, `syllabi`, `roles` | — |
+| 2 | `otp_challenges`, `audit_logs` | `users` |
+| 3 | `teacher_profiles`, `guardian_profiles` | `users` |
+| 4 | `institutes` | `users` (owner) |
+| 5 | `user_roles`, `institute_staff`, `teacher_institute` | `users`, `roles`, `institutes`, `teacher_profiles` |
+| 6 | `student_profiles` → `guardian_invitations` → `student_guardians` | `users`, `institutes`, `guardian_profiles` |
+| 7 | `classes` → `class_fee_versions`, `class_enrollments`, `class_sessions` | `institutes`, `teacher_profiles`, lookups, `student_profiles` |
+| 8 | `attendances` | `class_sessions`, `class_enrollments`, `users` |
+| 9 | `commission_rules` → `invoices` → `invoice_items`, `payments` → `payment_transactions`, `platform_commissions` | `institutes`, `classes`, `class_enrollments`, `student_profiles`, `guardian_profiles`, `users` |
+| 10 | `boost_products` → `boost_purchases` | `classes`, `institutes`, `users` |
+
+- **Not decided here (left for R1 to confirm against the contract, not invent):**
+  - The `institute_staff` status values other than `active`.
+  - Whether a class-scoped `commission_rules` row also stores `institute_id`.
+  - Whether a cancelled session should free its `(class_id, session_date, start_time)` slot. Under the contract as written it does not.
+
 ---
 
 ## Pending founder decisions
 
-None at technical level. C8 was approved as D-011, and its open questions were decided on 2026-10-28.
+- D-012: individual approver names (approval by the TuitionHub founders is recorded).
+- Everything in "R1 design notes — not yet approved". These are decided in R1, not now.
+
+C8 was approved as D-011, and its open questions were decided on 2026-10-28.
 
 ## Not yet done from the approved Day 1 plan (status as of 2026-10-27)
 

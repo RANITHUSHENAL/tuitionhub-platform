@@ -28,3 +28,9 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Local-only reference documents (DECISION_LOG D-012 F7).
+# Only the two schema references are tracked.
+/docs/reference/*
+!/docs/reference/TuitionHub_ER_Schema.md
+!/docs/reference/TuitionHub_Sprint_Schema_Draft.md

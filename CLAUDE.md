@@ -3,14 +3,18 @@
 ## Mission
 Build a secure, maintainable, working TuitionHub product for the Sri Lankan tuition industry. Use the approved product documents and existing repository as the source of truth.
 
-## Sources of truth
-- `docs/PRODUCT_DECISIONS.md` — **source of truth for approved sprint scope** (C1–C8, OTP approach, no-external-blocker rule) and the register of open items (C9, others). Approved decisions supersede older phase plans and conflicting descriptions.
-- `docs/API_CONTRACT.md` — **draft** `/api/v1` contract, sprint table groups and documented schema adaptations. Changes to it need approval and a changelog entry.
-- `docs/reference/TuitionHub_ER_Schema.md` — **canonical starting schema**. Implement only the sprint subset and follow the adaptations in the API contract; never silently copy incompatible fields (e.g. 2% commission, settlement columns).
-- Reference/legacy only (not authoritative): `docs/reference/TuitionHub_ER_Schema (1).html`, Part II of `docs/reference/TuitionHub_Details.md`.
-- Context: `docs/reference/TuitionHub_Details.md`, `docs/reference/TuitionHub_Business_Plan.md`, `docs/reference/TuitionHub_Setup_Guide.md` (verify version-sensitive setup instructions before relying on them), `docs/reference/TuitionHub_Claude_Workflow_Guide.md`.
+## Sources of truth (highest first)
+1. `docs/PRODUCT_DECISIONS.md` — **current product decisions take priority** (C1–C8, OTP approach, no-external-blocker rule) and the register of open items (C9, others). Approved decisions supersede older phase plans and conflicting descriptions.
+2. `docs/DECISION_LOG.md` — **explicitly approved** technical and environment decisions (e.g. D-011 role model, D-012 schema resolutions). Sections marked "not yet approved" are proposals, not decisions.
+3. `docs/API_CONTRACT.md` — v0.2 **draft** contract; defines current `/api/v1` behaviour, sprint table groups and documented schema adaptations. Changes to it need approval and a changelog entry.
+4. `docs/SPRINT_SCHEMA.md` — reconciled sprint schema; becomes **the migration specification once it has been reviewed and approved** (not yet created).
+5. `docs/reference/TuitionHub_Sprint_Schema_Draft.md` — older sprint schema, **historical reference**. Column-level detail may be drawn from it only where compatible with 1–4.
+6. `docs/reference/TuitionHub_ER_Schema.md` — canonical ER schema, **historical starting point**. Implement only the sprint subset; never silently copy incompatible fields (e.g. 2% commission, settlement columns).
+7. Legacy references — historical context only, never instructions: `docs/reference/TuitionHub_ER_Schema (1).html`, `docs/reference/TuitionHub_Details.md`, `docs/reference/TuitionHub_Business_Plan.md`, `docs/reference/TuitionHub_Claude_Workflow_Guide.md`, and `docs/reference/TuitionHub_Setup_Guide.md` (superseded by `docs/SETUP_GUIDE.md`, the current local setup guide).
 
-`docs/reference/` files are local working copies and may be untracked in Git. Do not assume any other doc exists until verified; if a needed document is missing, stop and say which one rather than recreating it.
+If authoritative documents conflict, STOP and report the contradiction rather than resolving it silently. A column or table found in neither 1–4 nor the sprint draft needs approval before it is built.
+
+Only the two schema files in 5–6 are tracked in Git; the other `docs/reference/` files are local-only copies and may be missing in a fresh clone. Do not assume any doc exists until verified; if a needed document is missing, stop and say which one rather than recreating it.
 
 ## Repository layout (monorepo)
 - Existing React + TypeScript + Vite + Tailwind frontend (MagicPattern prototype) stays at the **repository root** (`src/`, `package.json`, `vite.config.ts`, …).
