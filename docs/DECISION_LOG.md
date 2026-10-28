@@ -217,7 +217,7 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Header updates:** done in the M1 change. The `docs/SPRINT_SCHEMA.md` status line now reads "APPROVED (D-013)", and `CLAUDE.md` item 4 no longer says "(not yet created)".
 - **Pending:** Q19 and Q21; individual approver names. VP-1 and Q20 are resolved in D-014.
 
-## D-014 — M1 G1–G3 migrations verified (VP-1) — **Verified 2026-10-28; awaiting founder review before commit**
+## D-014 — M1 G1–G3 migrations verified (VP-1) — **Verified and committed (`02d43d4`); applied to `tuitionhub` on 2026-10-28**
 
 - **Scope:**
   - The G1–G3 migrations from `docs/SPRINT_SCHEMA.md` (D-013), implemented as the edited skeleton `0001_01_01_000000_create_users_table.php` (`users` + `sessions`; no `password_reset_tokens`) plus `2026_10_29_000001` … `2026_10_29_000009`.
@@ -257,9 +257,18 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Open item:** API date serialisation must match contract §1.5 (`"2026-10-19T08:30:00Z"`, no microseconds). Laravel's default output observed in VP-25 is `…T08:30:00.000000Z`. This must be fixed in the API resource / serialisation task.
 - **Not changed:**
   - `app/Models/User.php`. It still casts `email_verified_at` and has `name`, `email` and `password` as fillable, which is harmless. It will be reviewed in the auth task.
-- **Pending:**
-  - Founder review and the commit.
-  - Running these migrations on `tuitionhub` still needs its own approval.
+- **Development database migrated (2026-10-28)**, after founder approval at each step:
+  - **Preflight (read-only):** `php artisan db:show` confirmed database `tuitionhub`, MySQL **8.4.13**, account `tuitionhub_app`, and **0 tables** in `tuitionhub`.
+  - **`php artisan migrate --pretend`** printed the full SQL for review.
+    - With founder approval, its preparation step created the empty `migrations` table. In Laravel 13.38.0, `MigrateCommand::prepareDatabase()` creates it even with `--pretend`.
+    - No other statement ran.
+  - **`php artisan migrate`:** all 12 migrations completed (`DONE`) with no errors.
+  - **Result:**
+    - **22 tables** now exist in `tuitionhub`: the 15 G1–G3 tables, `sessions`, `migrations`, and the framework tables `cache`, `cache_locks`, `jobs`, `job_batches` and `failed_jobs`. There is no `password_reset_tokens` table.
+    - **The 3 roles were seeded** by the roles migration: `super_admin` → `global`, `institute_admin` → `institute`, `institute_staff` → `institute`. Each has non-null UTC timestamps (checked with `php artisan tinker`, a read-only query).
+  - **Not run:** `db:seed`, `migrate:fresh` and `db:wipe`. No other data was written.
+  - **Observation:** `db:show` also lists the 22 `tuitionhub_test` tables, because `tuitionhub_app` still has access to `tuitionhub_test` (D-004). Revoking it is optional and has not been done.
+- **Pending:** none for M1.
 
 ## R1 design notes — not yet approved
 
@@ -354,7 +363,6 @@ Notes on the table:
 
 - D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
 - D-013: the open schema questions Q19 (OTP details) and Q21 (lookup seed lists). VP-1 and Q20 are resolved (D-014).
-- D-014: founder review of the M1 migrations before commit; separate approval before migrating `tuitionhub`.
 - "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.
