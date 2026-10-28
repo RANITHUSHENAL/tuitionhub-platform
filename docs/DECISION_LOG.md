@@ -195,6 +195,26 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 
 - **Pending:** individual approver names.
 
+## D-013 — Sprint schema G1–G3 approved — **APPROVED by founders (2026-10-28), conditional on VP-1**
+
+- Approved by: TuitionHub founders on 2026-10-28.
+- **Decision:** `docs/SPRINT_SCHEMA.md` Revision 2, groups **G1–G3** (lookups and `roles`; `users`, `user_roles`, `otp_challenges`, `teacher_profiles`, `guardian_profiles`; `institutes`, `institute_staff`, `teacher_institute`), is the approved migration specification for those groups (`CLAUDE.md` source order, item 4).
+- **Verified (2026-10-28):** SHA-256 of the approved file: `f95a96ec6b148a2664708e61a4c15199770a9aef1333fc41d8bdfc58fda60089`.
+- **Condition: VP-1.**
+  - The G1–G3 migrations must first pass VP-1 on the disposable `tuitionhub_test` database only (`docs/SPRINT_SCHEMA.md` §0.B, §0.C). Only then may they run against `tuitionhub`.
+  - If VP-1 rejects a form (CHECK on the CHECK-bearing `user_roles` FK columns, the composite role FK, `REGEXP_LIKE` or the district list in a CHECK), the affected design returns to the founders. It is never adapted silently.
+- **Closed:** Q1–Q18 and Q22–Q24, with the outcomes recorded in the "Open questions" table of `docs/SPRINT_SCHEMA.md`. Q2 and Q7 hold subject to VP-1.
+- **Still open:**
+  - **Q19:** OTP details. Only the guarded attempt update is fixed.
+  - **Q20:** whether explicit `ON DELETE RESTRICT` or an unset `ON DELETE` is accepted on `user_roles.role_scope` and `user_roles.institute_id`. Resolved by VP-1.
+  - **Q21:** full lookup seed lists.
+- **Prerequisite carried forward:** `audit_logs` is first in R2. No role, institute or staff flow may run before it is migrated.
+- **Effect on earlier notes:** for G1–G3, `docs/SPRINT_SCHEMA.md` supersedes the "R1 design notes — not yet approved" below; for example, it uses explicit `dateTime()` rather than `datetimes()`. Those notes stay unapproved for later groups.
+- **Not yet updated** (separate approved edits needed):
+  - The `docs/SPRINT_SCHEMA.md` header still reads "DRAFT for founder review". This entry records its approval.
+  - `CLAUDE.md` item 4 still says "(not yet created)".
+- **Pending:** VP-1; Q19–Q21; individual approver names.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
@@ -286,8 +306,9 @@ Notes on the table:
 
 ## Pending founder decisions
 
-- D-012: individual approver names (approval by the TuitionHub founders is recorded).
-- Everything in "R1 design notes — not yet approved". These are decided in R1, not now.
+- D-012, D-013: individual approver names (approval by the TuitionHub founders is recorded).
+- D-013: VP-1 result, and the open schema questions Q19 (OTP details), Q20 (FK `ON DELETE` form, from VP-1) and Q21 (lookup seed lists).
+- "R1 design notes — not yet approved", for groups after G1–G3. For G1–G3 they are superseded by `docs/SPRINT_SCHEMA.md` (D-013).
 
 C8 was approved as D-011, and its open questions were decided on 2026-10-28.
 
