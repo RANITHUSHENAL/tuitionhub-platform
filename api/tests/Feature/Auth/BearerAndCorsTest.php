@@ -52,6 +52,14 @@ class BearerAndCorsTest extends TestCase
         }
     }
 
+    public function test_retry_after_is_exposed_to_the_spa_origin(): void
+    {
+        $this->spa('GET', '/api/v1/lookups')
+            ->assertOk()
+            ->assertHeader('Access-Control-Allow-Origin', 'http://localhost:5173')
+            ->assertHeader('Access-Control-Expose-Headers', 'Retry-After');
+    }
+
     public function test_unknown_api_routes_get_a_plain_404_with_no_store(): void
     {
         $this->spa('GET', '/api/v1/does-not-exist')
