@@ -19,12 +19,22 @@ final class AuditPayload
         'code', 'code_hash', 'otp', 'password', 'remember_token',
         'full_name', 'date_of_birth',
         'phone', 'guardian_phone', 'contact_phone',
+        'email', 'contact_email',
     ];
 
     private const DENIED_FRAGMENTS = ['password', 'token', 'secret', 'hash'];
 
     private const ALLOWED = [
         AuditAction::INSTITUTE_CREATED => ['name', 'district', 'city', 'status'],
+        // Contact details, the description and the registration number are recorded only as
+        // "changed" flags, never as values (D-020).
+        AuditAction::INSTITUTE_UPDATED => [
+            'name', 'district', 'city',
+            'description_changed', 'contact_phone_changed', 'contact_email_changed', 'business_reg_no_changed',
+        ],
+        AuditAction::INSTITUTE_STATUS_CHANGED => ['status'],
+        // The name itself is never recorded (FD-2).
+        AuditAction::USER_PROFILE_UPDATED => ['user_uuid', 'field', 'name_was_set', 'onboarding_completed'],
         AuditAction::ROLE_GRANTED => ['role', 'user_uuid', 'institute_uuid'],
         AuditAction::ROLE_REVOKED => ['role', 'user_uuid', 'institute_uuid'],
         AuditAction::STAFF_ADDED => ['user_uuid', 'institute_uuid', 'position', 'status', 'joined_on'],

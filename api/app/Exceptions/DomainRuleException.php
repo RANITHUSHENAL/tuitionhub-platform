@@ -7,10 +7,11 @@ use RuntimeException;
 use Throwable;
 
 /**
- * A business rule was violated. The reason is a stable machine-readable code (contract v0.4 §1.3).
+ * A business rule was violated. The reason is a stable machine-readable code (contract v0.5 §1.3).
  *
- * HTTP mapping: state conflicts are 409 with a `reason` field; NOT_ELIGIBLE is 403; invalid values
- * are 422 with Laravel's `errors` shape. Reasons not listed fall back to 422.
+ * HTTP mapping: state conflicts are 409 with a `reason` field; NOT_ELIGIBLE and INSTITUTE_SUSPENDED
+ * are 403 with a `reason` field; invalid values are 422 with Laravel's `errors` shape. Reasons not
+ * listed fall back to 422.
  */
 class DomainRuleException extends RuntimeException
 {
@@ -35,6 +36,8 @@ class DomainRuleException extends RuntimeException
     public const NOT_ACTIVE = 'not_active';
 
     public const INVALID_DATE = 'invalid_date';
+
+    public const INSTITUTE_SUSPENDED = 'institute_suspended';
 
     /** 409 state conflicts, rendered with their reason code. */
     private const CONFLICTS = [
@@ -67,6 +70,10 @@ class DomainRuleException extends RuntimeException
 
         if ($this->reason === self::NOT_ELIGIBLE) {
             return response()->json(['message' => 'You are not eligible to perform this action.', 'reason' => $this->reason], 403);
+        }
+
+        if ($this->reason === self::INSTITUTE_SUSPENDED) {
+            return response()->json(['message' => 'This institute is suspended.', 'reason' => $this->reason], 403);
         }
 
         [$field, $message] = self::INVALID[$this->reason] ?? ['request', 'The request is invalid.'];

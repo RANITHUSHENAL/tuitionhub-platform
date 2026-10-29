@@ -43,6 +43,13 @@ class ErrorMappingTest extends TestCase
             ->assertJsonPath('reason', DomainRuleException::NOT_ELIGIBLE);
     }
 
+    public function test_institute_suspended_is_403_with_a_reason_code(): void
+    {
+        $this->getJson('/api/v1/__test/domain-rule/'.DomainRuleException::INSTITUTE_SUSPENDED)
+            ->assertForbidden()
+            ->assertExactJson(['message' => 'This institute is suspended.', 'reason' => 'institute_suspended']);
+    }
+
     public function test_invalid_values_are_422_in_laravels_errors_shape(): void
     {
         $expected = [

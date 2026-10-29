@@ -10,7 +10,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -56,9 +56,11 @@ return Application::configure(basePath: dirname(__DIR__))
             503,
         ));
 
-        // Never reveal model class names or identifiers in a 404 (contract §1.4).
-        $exceptions->render(function (NotFoundHttpException $exception, Request $request) {
-            if ($request->is('api/*')) {
+        // Every API 404 has the same body and never names a model class or identifier (contract
+        // §1.4). This covers unmatched routes, missing or malformed route-model UUIDs, and policy
+        // denyAsNotFound() (Laravel turns that into a plain HttpException, not NotFoundHttpException).
+        $exceptions->render(function (HttpExceptionInterface $exception, Request $request) {
+            if ($exception->getStatusCode() === 404 && $request->is('api/*')) {
                 return response()->json(['message' => 'Not found.'], 404);
             }
         });

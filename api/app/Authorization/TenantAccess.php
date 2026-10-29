@@ -125,6 +125,74 @@ class TenantAccess
     }
 
     /**
+     * Institutes listed by GET /me/institutes (contract §5.3): a stored institute-scoped role, or
+     * an active teacher assignment. The global super_admin role lists nothing here. Suspended
+     * institutes are included (their status is shown). Ordered by name, then id.
+     *
+     * @return Builder<Institute>
+     */
+    public function myInstitutes(User $user): Builder
+    {
+        if (! $this->isActiveUser($user)) {
+            return Institute::query()->whereRaw('1 = 0');
+        }
+
+        return Institute::query()
+            ->where(fn (Builder $query) => $query
+                ->whereIn('id', UserRole::query()
+                    ->select('institute_id')
+                    ->where('user_id', $user->getKey())
+                    ->whereNotNull('institute_id'))
+                ->orWhereIn('id', $this->activeAssignments($user)->select('institute_id')))
+            ->orderBy('name')
+            ->orderBy('id');
+    }
+
+    /**
+     * my_access labels per institute (contract §5.3): each stored institute role, plus `teacher`
+     * for an active assignment. Two queries for the whole page.
+     *
+     * @param  iterable<Institute>  $institutes
+     * @return array<int, list<string>> keyed by institute id
+     */
+    public function accessLabels(User $user, iterable $institutes): array
+    {
+        $ids = [];
+
+        foreach ($institutes as $institute) {
+            $ids[] = $institute->getKey();
+        }
+
+        $labels = array_fill_keys($ids, []);
+
+        if ($ids === [] || ! $this->isActiveUser($user)) {
+            return $labels;
+        }
+
+        $roles = UserRole::query()
+            ->with('role')
+            ->where('user_id', $user->getKey())
+            ->whereIn('institute_id', $ids)
+            ->get();
+
+        foreach ([Role::INSTITUTE_ADMIN, Role::INSTITUTE_STAFF] as $roleName) {
+            foreach ($roles as $userRole) {
+                if ($userRole->role->name === $roleName) {
+                    $labels[$userRole->institute_id][] = $roleName;
+                }
+            }
+        }
+
+        $teaching = $this->activeAssignments($user)->whereIn('institute_id', $ids)->pluck('institute_id');
+
+        foreach ($teaching->unique() as $instituteId) {
+            $labels[$instituteId][] = 'teacher';
+        }
+
+        return $labels;
+    }
+
+    /**
      * Re-read from the database: an in-memory model may be stale.
      */
     private function isActiveUser(User $user): bool

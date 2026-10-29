@@ -21,10 +21,12 @@ use App\Otp\LogOtpDriver;
 use App\Otp\OtpCodeHasher;
 use App\Otp\OtpDriver;
 use App\Otp\UnavailableOtpDriver;
+use App\Policies\InstitutePolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Sanctum\Sanctum;
@@ -77,6 +79,18 @@ class AppServiceProvider extends ServiceProvider
             10,
             (int) config('otp.limits.verify_per_ip_per_10_minutes'),
         )->by('otp-verify-ip-10m|'.$request->ip()));
+
+        // General API limits (D-020), applied per route group; the OTP routes keep only their own
+        // limiters above. Authenticated routes are keyed by user (the throttle runs after
+        // auth:sanctum, Laravel's middleware priority), so users behind one IP do not share a limit.
+        RateLimiter::for('api-authenticated', fn (Request $request) => Limit::perMinute(60)->by(
+            $request->user() !== null ? 'api-user|'.$request->user()->getKey() : 'api-ip|'.$request->ip(),
+        ));
+
+        RateLimiter::for('api-public', fn (Request $request) => Limit::perMinute(60)->by('api-public-ip|'.$request->ip()));
+
+        // Explicit rather than discovered, so a renamed class can never silently drop the policy.
+        Gate::policy(Institute::class, InstitutePolicy::class);
 
         // Outside production, mass-assigning a guarded attribute, lazy loading and reading a
         // missing attribute throw instead of failing silently.
