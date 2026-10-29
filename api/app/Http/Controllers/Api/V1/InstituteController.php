@@ -11,6 +11,7 @@ use App\Http\Responses\PaginatedResponse;
 use App\Models\Institute;
 use App\Services\InstituteService;
 use App\Support\District;
+use App\Support\LikePattern;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Gate;
 
@@ -40,7 +41,7 @@ class InstituteController extends Controller
         }
 
         if ($request->filled('q')) {
-            $query->where('name', 'like', '%'.self::escapeLike($request->validated('q')).'%');
+            $query->where('name', 'like', LikePattern::contains($request->validated('q')));
         }
 
         $page = $query
@@ -63,13 +64,5 @@ class InstituteController extends Controller
         $institute = $institutes->update($request->user(), $institute, $request->validated());
 
         return InstituteResource::make($institute->refresh())->response();
-    }
-
-    /**
-     * The search text is matched literally: LIKE wildcards in it are escaped.
-     */
-    private static function escapeLike(string $value): string
-    {
-        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
     }
 }

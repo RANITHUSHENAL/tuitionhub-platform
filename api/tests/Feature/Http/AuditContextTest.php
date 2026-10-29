@@ -6,6 +6,7 @@ use App\Audit\AuditAction;
 use App\Audit\AuditContext;
 use App\Models\Role;
 use App\Services\RoleAssignmentService;
+use Database\Seeders\LookupSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\Feature\Http\Concerns\ApiActors;
@@ -67,6 +68,30 @@ class AuditContextTest extends TestCase
         $this->assertEquals($user->getKey(), $row['user_id']);
         $this->assertNull($row['ip_address']);
         $this->assertSame(512, mb_strlen($row['user_agent']));
+    }
+
+    public function test_e1b_writes_by_different_users_record_their_own_actors(): void
+    {
+        $this->seed(LookupSeeder::class);
+        $institute = $this->makeInstitute();
+        $admin = $this->adminOf($institute);
+        $staff = $this->staffOf($institute);
+        $teacher = $this->teacherProfileFor();
+
+        $this->loginAs($admin);
+        $this->spa('POST', "/api/v1/institutes/{$institute->uuid}/teacher-assignments", ['teacher_uuid' => $teacher->uuid, 'joined_on' => '2026-10-20'], ['User-Agent' => 'FictionalAdmin/1.0'])
+            ->assertCreated();
+        $this->assertSystemContext();
+
+        $this->loginAs($staff);
+        $this->spa('POST', "/api/v1/institutes/{$institute->uuid}/students", ['full_name' => 'Fictional Student', 'grade_code' => 'G11', 'medium_code' => 'sin'], ['User-Agent' => 'FictionalStaff/1.0'])
+            ->assertCreated();
+        $this->assertSystemContext();
+
+        $assigned = $this->auditRows(AuditAction::TEACHER_ASSIGNED)[0];
+        $created = $this->auditRows(AuditAction::STUDENT_CREATED)[0];
+        $this->assertEquals([$admin->getKey(), 'FictionalAdmin/1.0'], [$assigned['user_id'], $assigned['user_agent']]);
+        $this->assertEquals([$staff->getKey(), 'FictionalStaff/1.0'], [$created['user_id'], $created['user_agent']]);
     }
 
     private function assertSystemContext(): void

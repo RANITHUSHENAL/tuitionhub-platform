@@ -40,6 +40,9 @@ final class AuditPayload
         AuditAction::STAFF_ADDED => ['user_uuid', 'institute_uuid', 'position', 'status', 'joined_on'],
         AuditAction::STAFF_ENDED => ['user_uuid', 'institute_uuid', 'position', 'status', 'joined_on', 'left_on'],
         AuditAction::TEACHER_ASSIGNMENT_ENDED => ['teacher_uuid', 'institute_uuid', 'status', 'joined_on', 'left_on'],
+        AuditAction::TEACHER_ASSIGNED => ['teacher_uuid', 'institute_uuid', 'status', 'joined_on'],
+        // Never the student's name or date of birth (both are on the denylist above).
+        AuditAction::STUDENT_CREATED => ['student_uuid', 'institute_uuid', 'grade_code', 'medium_code', 'exam_target_code'],
     ];
 
     /**

@@ -88,4 +88,15 @@ class PersonNameTest extends TestCase
     {
         $this->assertSame($reason, PersonName::violation(PersonName::normalize($name)));
     }
+
+    public function test_the_maximum_length_is_a_parameter_and_student_names_allow_150(): void
+    {
+        $name150 = str_repeat("\u{0D85}", 150);
+
+        $this->assertSame(PersonName::ERROR_LENGTH, PersonName::violation($name150));
+        $this->assertNull(PersonName::violation($name150, PersonName::STUDENT_MAX_LENGTH));
+        $this->assertSame(PersonName::ERROR_LENGTH, PersonName::violation($name150."\u{0D85}", PersonName::STUDENT_MAX_LENGTH));
+        // The character rules do not change with the limit.
+        $this->assertSame(PersonName::ERROR_CHARACTERS, PersonName::violation('Student 2', PersonName::STUDENT_MAX_LENGTH));
+    }
 }

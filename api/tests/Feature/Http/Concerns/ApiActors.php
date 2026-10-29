@@ -4,7 +4,9 @@ namespace Tests\Feature\Http\Concerns;
 
 use App\Models\Institute;
 use App\Models\Role;
+use App\Models\TeacherProfile;
 use App\Models\User;
+use Database\Seeders\LookupSeeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\Feature\Auth\Concerns\InteractsWithSpa;
@@ -70,6 +72,24 @@ trait ApiActors
         $this->insertAssignment($teacherId, $institute->getKey(), $assignment);
 
         return $user;
+    }
+
+    /**
+     * A teacher profile with no assignment anywhere.
+     */
+    protected function teacherProfileFor(?User $user = null): TeacherProfile
+    {
+        $user ??= $this->makeUser(['name' => 'Fictional Teacher']);
+
+        return TeacherProfile::query()->findOrFail($this->insertTeacherProfile([
+            'user_id' => $user->getKey(),
+            'display_name' => 'Mr. Fictional Teacher',
+        ]));
+    }
+
+    protected function seedLookups(): void
+    {
+        $this->seed(LookupSeeder::class);
     }
 
     protected function suspend(Institute $institute): void

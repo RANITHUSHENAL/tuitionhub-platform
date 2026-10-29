@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.5 |
-| **Date** | 2026-10-29 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4: 2026-10-29) |
+| **Version** | `v1` draft 0.6 |
+| **Date** | 2026-10-29 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5: 2026-10-29) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
 | **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). |
@@ -96,7 +96,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 | `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …), with a `reason` code (§1.3) |
 | `419` | CSRF token missing or invalid on a stateful SPA request (§1.2). The SPA should fetch `/sanctum/csrf-cookie` again and retry once. |
 | `422` | Validation error |
-| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5 and §5 share **60 requests per minute per user**; `GET /lookups` allows **60 per minute per IP**. The OTP endpoints (§4.1, §4.2) have only their own limits. |
+| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.3 and §8.1–§8.2 share **60 requests per minute per user**; `GET /lookups` allows **60 per minute per IP**. The OTP endpoints (§4.1, §4.2) have only their own limits. |
 | `503` | A required service is unavailable or not configured (e.g. OTP driver or OTP key, §4.1; invitation key, §9.1). Fails closed; never degrades to an insecure fallback. |
 
 ### 1.5 Data types
@@ -329,7 +329,7 @@ Approved FD-1 (onboarding name capture; closes the §14.1 gap).
   - **Normalised first:** leading and trailing whitespace removed, Unicode NFC, and every run of space characters (including no-break spaces) collapsed to one ASCII space. Control characters are **not** turned into spaces; a name containing one is rejected.
   - **Allowed:** letters in any script, combining marks (Sinhala and Tamil vowel signs), spaces, full stops, apostrophes (`'` and `’`) and hyphens. ZWNJ/ZWJ (U+200C/U+200D) only between letters or marks, because Sinhala conjuncts need ZWJ (e.g. ශ්‍රී). It must start with a letter and end with a letter, mark or full stop.
   - **Refused:** digits, symbols and emoji, control characters (line breaks, tabs, NUL), other invisible format characters (bidirectional overrides and isolates, BOM, soft hyphen, zero-width space), private-use or unassigned code points, and invalid UTF-8.
-  - **Length:** 2–100 characters (Unicode code points) after normalisation.
+  - **Length:** 2–100 characters (Unicode code points) after normalisation. The same rules apply to teachers' `display_name` (§6.1) and, with a 150-character limit, to students' `full_name` (§8.1). Longer input is rejected, never truncated.
 - **Rules:**
   - Only `users.name` (and `updated_at`) changes. The name may be changed again later; each change is audited.
   - `onboarding_required` is `name === null`, so it becomes `false` after the first successful call.
@@ -493,9 +493,16 @@ Teacher shape (`Teacher`):
 { "display_name": "Mr. Kasun Silva", "headline": "A/L Combined Maths", "bio": "…", "years_experience": 8 }
 ```
 
-- **Success:** `201` when created, `200` when updated — `{ "data": Teacher }`.
-- **Rules:** Creating a profile grants no institute access. `user_id` is taken from the session.
-- **Errors:** `401`, `422`.
+- **Success:** `201` when created, `200` when updated — `{ "data": Teacher }`. The profile `uuid` never changes.
+- **Rules:** Creating a profile grants no institute access and creates no role (§3). `user_id` is taken from the session; `user_id`, `uuid`, `is_independent`, `public_visibility` and any other unlisted field are rejected (`422`, §1.6).
+- **Fields:**
+  - `display_name`: required on the **first** call (when the profile is created), optional afterwards; person-name rules of §4.5 (2–100 characters, normalised first). It cannot be cleared.
+  - `headline`: optional, max 150, single line (§1.6 free text); `null` clears it.
+  - `bio`: optional, max 2000, multi-line; `null` clears it.
+  - `years_experience`: optional integer 0–70; `null` is rejected (the stored default is `0`).
+- **Updates are partial:** a field left out of the request keeps its stored value; an explicit `null` clears `headline` or `bio`. A call that changes nothing writes nothing (§1.6).
+- **Not audited** in the sprint (FD-6): §13 defines no teacher-profile event.
+- **Errors:** `401`, `403` (suspended account), `419`, `422`.
 
 ### 6.2 `POST /api/v1/institutes/{instituteUuid}/teacher-assignments`
 
@@ -523,15 +530,23 @@ Teacher shape (`Teacher`):
 ```
 
 - **Rules:** Creates **only** an active `teacher_institute` row. No `user_roles` row is created; the teacher's access is derived from this active assignment (§3). The assignment takes effect immediately; there is no teacher invitation or consent step in the sprint (C8). Assignments are never deleted (ending one sets `left_on`/`former`; no end endpoint in sprint).
+- **Fields:** `teacher_uuid` required, a UUID of an existing teacher profile (malformed or unknown → `422` on `teacher_uuid`; a malformed value is refused before any lookup); `joined_on` required, a real calendar date `YYYY-MM-DD` (§1.5), **today or earlier** in `Asia/Colombo` (a future date → `422` on `joined_on`; backdated assignments are allowed). An assignment grants access as soon as it exists, so a future start date would grant access before it begins. Any other field → `422` (§1.6).
+- **Authorization** (checked before validation, §1.4): no relationship → `404`; staff or teacher-only → `403`; admin of a **suspended** institute → `403` `reason: institute_suspended`; `super_admin` may assign even to a suspended institute. The service locks the institute row and authorizes again inside its transaction.
+- **Conflict:** a second **active** assignment of the same teacher to the same institute → `409` `reason: already_active`. A former (ended) assignment does not block a new one.
+- **Audit:** `teacher.assigned` with `teacher_uuid`, `institute_uuid`, `status`, `joined_on` (§13), in the same transaction.
 - **Errors:** `401`, `403`, `404` (institute), `409` (already actively assigned), `422` (unknown teacher UUID).
 
 ### 6.3 `GET /api/v1/institutes/{instituteUuid}/teachers?status=&page=&per_page=`
 
-- **Permission:** same-institute staff/admin, or `super_admin`.
+- **Permission:** same-institute staff/admin, or `super_admin`. A **suspended** institute stays readable by its admins and staff (FD-3).
+- **Filter:** `status` (`active|former`); default: both.
+- **Order:** `joined_on` newest first, then most recently created first.
 - **Success `200`:** paginated `[{ "teacher": Teacher, "status": "active", "joined_on": "…", "left_on": null }]`.
-- **Errors:** `401`, `404`.
+- **Errors:** `401`; `403` for a teacher-only caller (FD-4); `404` (missing, malformed UUID, or no relationship to the institute); `422` (filter or pagination).
 
 ### 6.4 `GET /api/v1/me/teacher/classes?status=&page=&per_page=`
+
+> **Deferred (v0.6):** not implemented yet. It needs the classes tables (G5), which are not built; the route is not registered, so it currently answers the generic `404`. It ships with the classes work.
 
 - **Permission:** `authenticated` with a teacher profile. Returns only classes where the caller is the assigned teacher with an active assignment.
 - **Success `200`:** paginated `Class[]` (§7).
@@ -677,13 +692,24 @@ Student shape (`Student`, institute view):
 
 - **Success `201`:** `{ "data": Student }`
 - **Rules:** Creates an institute-managed `student_profiles` row (`managing_institute_id` and `created_by_user_id` from server; `user_id = NULL`). No NIC, ID documents or photos are accepted. Demo/seed data must be fictional. Audited (`student.created`, without the student's name or date of birth; §13).
+- **Fields:**
+  - `full_name`: required; person-name rules of §4.5, but **2–150** characters (longer names are rejected, never truncated).
+  - `grade_code`, `medium_code`: required; `exam_target_code`: optional (`null` allowed). Each must be an existing code from §4.6, **matched exactly** (`g11` is not `G11`; unknown → `422` on that field). The response carries the canonical code and name.
+  - `date_of_birth`: optional (`null` allowed), a real calendar date `YYYY-MM-DD`, **not in the future** (today in `Asia/Colombo` is the latest allowed).
+  - Any other field (`managing_institute_id`, `institute_uuid`, `created_by_user_id`, `user_id`, `uuid`, `nic`, `photo`, …) → `422` (§1.6).
+- **Authorization** (checked before validation, §1.4): the institute's admins and active staff only. No relationship → `404`; teacher-only callers and `super_admin` → `403` (super_admin is not a member, §3); a **suspended** institute → `403` `reason: institute_suspended`. The service locks the institute row and authorizes again inside its transaction.
+- **Audit:** `student.created` with `student_uuid`, `institute_uuid`, `grade_code`, `medium_code`, `exam_target_code` (§13). `full_name` and `date_of_birth` are refused by the audit denylist.
 - **Errors:** `401`, `403`, `404`, `422`.
 
 ### 8.2 `GET /api/v1/institutes/{instituteUuid}/students?q=&grade_code=&page=&per_page=`
 
-- **Permission:** same-institute staff/admin. Teachers do **not** use this endpoint; they see only rosters of their assigned classes via §8.4.
+- **Permission:** same-institute staff/admin. Teachers do **not** use this endpoint; they see only rosters of their assigned classes via §8.4. `super_admin` is not a member and gets `403`. A **suspended** institute stays readable by its admins and staff (FD-3).
+- **Scope:** only students whose managing institute is the one in the route.
+- **Filters:** `q` (max 100, case-insensitive substring of `full_name`; `%` and `_` matched literally); `grade_code` (exact code from §4.6; unknown → `422`).
+- **Order:** `full_name`, then internal creation order.
+- **`active_guardian_count`** counts **active** links only; revoked links are history and are not counted.
 - **Success `200`:** paginated `Student[]`.
-- **Errors:** `401`, `403` (teacher-only role), `404`.
+- **Errors:** `401`, `403` (teacher-only role, `super_admin`), `404`, `422` (filters or pagination).
 
 ### 8.3 `POST /api/v1/classes/{classUuid}/enrollments`
 
@@ -1232,6 +1258,8 @@ Written to `audit_logs` (immutable, no soft deletes) with actor, target, old/new
 | `institute.created` | `institute` | — | `name`, `district`, `city`, `status` |
 | `institute.updated` | `institute` | changed `name`, `district`, `city` | the same fields' new values, plus `description_changed`, `contact_phone_changed`, `contact_email_changed`, `business_reg_no_changed` (`true` when changed) |
 | `institute.status_changed` | `institute` | `status` | `status` |
+| `teacher.assigned` | `teacher_assignment` | — | `teacher_uuid`, `institute_uuid`, `status`, `joined_on` |
+| `student.created` | `student_profile` | — | `student_uuid`, `institute_uuid`, `grade_code`, `medium_code`, `exam_target_code` — never the name or date of birth |
 
 ---
 
@@ -1261,16 +1289,16 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 5.4 | GET | `/api/v1/institutes/{instituteUuid}` | same-institute staff/admin, super_admin (incl. suspended institutes) |
 | 5.5 | PATCH | `/api/v1/institutes/{instituteUuid}` | same-institute owner/admin, super_admin; `status` super_admin only; suspended → super_admin only |
 | 6.1 | POST | `/api/v1/me/teacher-profile` | authenticated (self) |
-| 6.2 | POST | `/api/v1/institutes/{instituteUuid}/teacher-assignments` | same-institute owner/admin, super_admin |
-| 6.3 | GET | `/api/v1/institutes/{instituteUuid}/teachers` | same-institute staff/admin, super_admin |
-| 6.4 | GET | `/api/v1/me/teacher/classes` | authenticated teacher |
+| 6.2 | POST | `/api/v1/institutes/{instituteUuid}/teacher-assignments` | same-institute owner/admin, super_admin; suspended → super_admin only |
+| 6.3 | GET | `/api/v1/institutes/{instituteUuid}/teachers` | same-institute staff/admin, super_admin (incl. suspended institutes) |
+| 6.4 | GET | `/api/v1/me/teacher/classes` | authenticated teacher — **deferred** (needs classes) |
 | 7.1 | POST | `/api/v1/institutes/{instituteUuid}/classes` | same-institute owner/admin |
 | 7.2 | GET | `/api/v1/institutes/{instituteUuid}/classes` | same-institute staff/admin, super_admin |
 | 7.3 | GET | `/api/v1/classes/{classUuid}` | public if active+public; else restricted |
 | 7.4 | PATCH | `/api/v1/classes/{classUuid}` | owning-institute admin, super_admin |
 | 7.5 | GET | `/api/v1/public/classes` | public |
-| 8.1 | POST | `/api/v1/institutes/{instituteUuid}/students` | same-institute staff/admin |
-| 8.2 | GET | `/api/v1/institutes/{instituteUuid}/students` | same-institute staff/admin |
+| 8.1 | POST | `/api/v1/institutes/{instituteUuid}/students` | same-institute staff/admin (not super_admin); not while suspended |
+| 8.2 | GET | `/api/v1/institutes/{instituteUuid}/students` | same-institute staff/admin (not super_admin; incl. suspended institutes) |
 | 8.3 | POST | `/api/v1/classes/{classUuid}/enrollments` | same-institute staff/admin |
 | 8.4 | GET | `/api/v1/classes/{classUuid}/enrollments` | assigned teacher, same-institute staff/admin |
 | 9.1 | POST | `/api/v1/students/{studentUuid}/guardian-invitations` | managing-institute staff/admin |
@@ -1305,3 +1333,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 0.3 draft | 2026-10-28 | **D-015 approved** (Ranithu Shenal, 2026-10-28). §2.3: dedicated `GUARDIAN_INVITE_HMAC_KEY` for `code_hash`; at most one active primary link per student. §8.1: `student.created` audited. §9.1: code generation (8 characters, unambiguous alphabet, secure random source, `XXXX-XXXX`), dedicated HMAC key (fail closed, `503`), lazy expiry checked on every read. §9.2: normalisation (upper-case, remove spaces and hyphens), authenticated phone match, initial primary under a student-row lock; no manual primary selection. §9.3: an expired invitation cannot be revoked (`409`). §9.4: atomic primary promotion after revocation, with old/new link IDs audited. §11.2: `billed_guardian_id` is an immutable addressee snapshot. §11.5/§11.6: any actively linked guardian may view an invoice and start a demo payment, regardless of `billed_guardian_id` (§15 labels updated). §11.7: atomic demo completion; already-paid invoices rejected; no double success or double accrual. §13: events `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `teacher_assignment.ended`, `student.created`; primary changes recorded in `guardian_link.created`/`guardian_link.revoked`; masked phones only; raw IP with retention pending pre-launch privacy review; stable target aliases. |
 | 0.4 draft | 2026-10-29 | **A1 SPA authentication and OTP (D-019).** §1.1: `Cache-Control: no-store, private` on every `/api/v1` response. §1.2: bearer tokens never accepted (`401`); stateful origin (`SANCTUM_STATEFUL_DOMAINS`) and CORS (`FRONTEND_URL`, credentials) defined; `419` on a missing or wrong CSRF token; verify is SPA-only (`403` otherwise), logout/session `401` to non-stateful clients. §1.3: `409` body `{message, reason}` with the defined reason codes; `403 not_eligible` carries `reason`; business-rule invalid values use the `422` `errors` shape. §1.4: added `419` and `503`; `404` body fixed to `{"message":"Not found."}`. §4.1: HMAC-SHA256 `code_hash` bound to challenge and phone under `OTP_HMAC_KEY` (missing or short key → `503`, OTP only); `log` driver writes only to the `otp` channel; `log`/`fake` fail closed in production; resend creates a new challenge and expires older pending ones; limits finalised (3 per phone per 15 min, 10 per phone per 24 h, 10 per IP per hour, 60 s cooldown), identical for registered and unregistered phones. §4.2: 5 attempts, increment committed before the `422`; exhausted challenges return `429` even for the correct code; exactly-once consumption; suspended user with a correct code → challenge consumed, `403`, no login; 10 verifies per IP per 10 min. §4.3: suspended users may log out; new CSRF token. §4.4: suspended → `403`. §15 labels updated. |
 | 0.5 draft | 2026-10-29 | **E1a: shared HTTP rules, `PATCH /me`, institutes, lookups (D-020; founder decisions FD-1–FD-10).** §1.3: pagination `meta` has exactly four keys and no `links`; `page`/`per_page` bounds; deterministic ordering; new `403` reason `institute_suspended` (FD-9). §1.4: the `401` → suspended `403` → malformed-UUID `404` → hidden `404` / related `403` → `422` order; authorization before validation. §1.6: unknown fields rejected with `422` (FD-5); free-text character rules; audit failure rolls the write back; unchanged writes are not audited. §3: suspended institutes readable by admins and staff (FD-3); unrelated callers still `404`. §4.5 **new** `PATCH /api/v1/me` (FD-1, FD-10 name rules) audited as **new** event `user.profile_updated` without the name (FD-2); closes §14.1 gap. §4.6 **new** public `GET /api/v1/lookups` (FD-8) with the FD-7 seed values (Q21) and the 25 districts. §5.1–§5.3: field limits, filters, ordering, district canonicalisation. §5.4: teacher-only callers `403` (FD-4). §5.5: status change by admin `403`; suspended institute writes `403 institute_suspended`; re-authorization under row lock; audit payload rules (no raw contact details). §7/§7.1: examples aligned with the approved lookups (subject `COMBINED_MATH` "Combined Mathematics", `AL2` "A/L Year 2 (Grade 13)", `local` "Local (National)"); 15 subjects in §4.6. §1.4/§4.6: general rate limits — 60 requests/min per user on the authenticated §4.5/§5 endpoints, 60/min per IP on `GET /lookups`; OTP limits unchanged. §13: actor/IP/user-agent binding, e-mail addresses denied, payload table. §15: rows 4.5, 4.6 and labels. |
+| 0.6 draft | 2026-10-29 | **E1b: teacher and student endpoints (D-021).** §4.5: person-name rules also cover teacher `display_name` (100) and student `full_name` (150; rejected, never truncated). §6.1: field rules; `display_name` required only on creation; partial updates (omitted = unchanged, `null` clears `headline`/`bio`, `years_experience` not nullable); not audited (FD-6). §6.2: field rules (malformed or unknown `teacher_uuid` → `422`; `joined_on` a real date, today or earlier in `Asia/Colombo`, future → `422`); authorization order incl. `institute_suspended`; `409 already_active`; former assignments do not block; `teacher.assigned` payload. §6.3: `status` filter, order, teacher-only `403` (FD-4), suspended institutes readable (FD-3). §6.4: **deferred** until the classes tables exist. §8.1: field rules (exact lookup codes, DOB not in the future in `Asia/Colombo`, server-owned/identity/document fields → `422`); `super_admin` and teacher-only `403`; `institute_suspended`; `student.created` payload without name or DOB. §8.2: route-institute scope, filters, order, `super_admin` `403`, `active_guardian_count` counts active links only. §1.4: the 60/min per-user limit also covers §6.1–§6.3 and §8.1–§8.2. §13: `teacher.assigned` and `student.created` payloads. §15: labels. |

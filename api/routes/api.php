@@ -3,16 +3,19 @@
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
 use App\Http\Controllers\Api\V1\InstituteController;
+use App\Http\Controllers\Api\V1\InstituteTeacherController;
 use App\Http\Controllers\Api\V1\LookupController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MyInstitutesController;
+use App\Http\Controllers\Api\V1\StudentController;
+use App\Http\Controllers\Api\V1\TeacherProfileController;
 use App\Http\Middleware\BindAuditContext;
 use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\RequireStatefulFrontend;
 use Illuminate\Support\Facades\Route;
 
 /*
-| /api/v1 — contract v0.5. Session (cookie) auth only: bearer tokens are disabled (D-019).
+| /api/v1 — contract v0.6. Session (cookie) auth only: bearer tokens are disabled (D-019).
 */
 
 Route::prefix('v1')->group(function () {
@@ -48,5 +51,12 @@ Route::prefix('v1')->group(function () {
             Route::get('institutes', [InstituteController::class, 'index']);
             Route::get('institutes/{institute}', [InstituteController::class, 'show']);
             Route::patch('institutes/{institute}', [InstituteController::class, 'update']);
+
+            // E1b (§6.1–§6.3, §8.1–§8.2). §6.4 (my classes) needs the classes tables and is deferred.
+            Route::post('me/teacher-profile', [TeacherProfileController::class, 'upsert']);
+            Route::post('institutes/{institute}/teacher-assignments', [InstituteTeacherController::class, 'store']);
+            Route::get('institutes/{institute}/teachers', [InstituteTeacherController::class, 'index']);
+            Route::post('institutes/{institute}/students', [StudentController::class, 'store']);
+            Route::get('institutes/{institute}/students', [StudentController::class, 'index']);
         });
 });

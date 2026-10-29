@@ -21,7 +21,11 @@ final class PersonName
 {
     public const MIN_LENGTH = 2;
 
+    /** Users' and teachers' names (FD-10). */
     public const MAX_LENGTH = 100;
+
+    /** Students' full names (E1 plan, contract v0.6 §8.1). */
+    public const STUDENT_MAX_LENGTH = 150;
 
     public const ERROR_CHARACTERS = 'characters';
 
@@ -50,9 +54,10 @@ final class PersonName
     }
 
     /**
-     * The reason a normalized name is refused, or null when it is valid.
+     * The reason a normalized name is refused, or null when it is valid. A name longer than
+     * $maxLength is refused, never truncated.
      */
-    public static function violation(string $name): ?string
+    public static function violation(string $name, int $maxLength = self::MAX_LENGTH): ?string
     {
         if (! mb_check_encoding($name, 'UTF-8')) {
             return self::ERROR_CHARACTERS;
@@ -60,7 +65,7 @@ final class PersonName
 
         $length = mb_strlen($name, 'UTF-8');
 
-        if ($length < self::MIN_LENGTH || $length > self::MAX_LENGTH) {
+        if ($length < self::MIN_LENGTH || $length > $maxLength) {
             return self::ERROR_LENGTH;
         }
 
