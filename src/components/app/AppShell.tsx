@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { BellIcon, ChevronDownIcon, ChevronLeftIcon } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
+import { PreviewBanner } from '../ui/PreviewBanner';
 import { AccountMenu } from './AccountMenu';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -166,7 +167,11 @@ export function AppShell({
             )}
           </nav>
 
-          <main className="px-5 py-6 lg:px-8 lg:py-8">{children}</main>
+          <main className="px-5 py-6 lg:px-8 lg:py-8">
+            {/* Every dashboard page still shows prototype sample data (no page reads the API yet). */}
+            <PreviewBanner />
+            {children}
+          </main>
         </div>
       </div>
     </div>);

@@ -7,10 +7,11 @@ import { Modal } from '../../components/ui/DetailPanel';
 import { Label, Select, TextInput } from '../../components/ui/Field';
 import { Toast } from '../../components/ui/States';
 import { useTeacherScope } from '../../hooks/useTeacherScope';
-import { subjects } from '../../data/classes';
+import { useLookups } from '../../hooks/useLookups';
 
 export function TeacherClasses() {
   const { myClasses, isIndependent, workspace } = useTeacherScope();
+  const { subjectNames } = useLookups();
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState(false);
 
@@ -86,7 +87,7 @@ export function TeacherClasses() {
             <div>
               <Label htmlFor="ncsub">Subject</Label>
               <Select id="ncsub">
-                {subjects.map((s) =>
+                {subjectNames.map((s) =>
                 <option key={s}>{s}</option>
                 )}
               </Select>

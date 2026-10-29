@@ -1,8 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { authApi, type AccountSession } from '../lib/api';
+import { identityFromAccount } from '../lib/identity';
 import type { AuthUser, Identity, TeachingWorkspace } from '../types';
 
-const STORAGE_KEY = 'th-auth-session';
+/** Only the chosen role and workspace are remembered in the browser; never the session itself. */
+const PREFERENCE_KEY = 'th-active-profile';
 const WINDOW_MS = 72 * 60 * 60 * 1000;
 
 export type GuardianState = 'not-required' | 'linked' | 'pending' | 'restricted';
@@ -20,11 +23,20 @@ interface AuthContextValue {
   /** Every role profile this identity holds */
   profiles: AuthUser[];
   activeWorkspace: TeachingWorkspace | null;
-  /** Sign in with a single profile (new signups) or a full identity */
+  /** The signed-in account from the API (null when signed out); the source of truth for the session. */
+  account: AccountSession | null;
+  /** `loading` until the first GET /auth/session has answered. */
+  status: 'loading' | 'ready';
+  /** Stores a session the API has just confirmed (after OTP verify or PATCH /me). */
+  establishSession: (account: AccountSession) => Identity;
+  /** Re-reads GET /auth/session; returns null when signed out. */
+  refreshSession: () => Promise<AccountSession | null>;
+  /** Prototype signup flows only: an in-memory profile with no API session behind it. */
   signIn: (user: AuthUser, identity?: Identity) => void;
   switchProfile: (profileId: string, workspaceId?: string) => void;
   switchWorkspace: (workspaceId: string) => void;
-  signOut: () => void;
+  /** Ends the API session (POST /auth/logout), then clears local state. */
+  signOut: () => Promise<void>;
   update: (patch: Partial<AuthUser>) => void;
   /**
    * Returns true when the user may continue. Otherwise sends a guest to sign-in,
@@ -36,12 +48,26 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function load(): Session | null {
+interface Preference {
+  profileId: string;
+  workspaceId?: string;
+}
+
+function loadPreference(): Preference | null {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) as Session : null;
+    const raw = window.localStorage.getItem(PREFERENCE_KEY);
+    return raw ? JSON.parse(raw) as Preference : null;
   } catch {
     return null;
+  }
+}
+
+function savePreference(preference: Preference | null) {
+  try {
+    if (preference) window.localStorage.setItem(PREFERENCE_KEY, JSON.stringify(preference));else
+    window.localStorage.removeItem(PREFERENCE_KEY);
+  } catch {
+    // Storage may be unavailable (private mode); the preference is only a convenience.
   }
 }
 
@@ -58,14 +84,62 @@ function withWindow(p: AuthUser): AuthUser {
   p;
 }
 
+function sessionFrom(identity: Identity, preference: Preference | null): Session {
+  const preferred = identity.profiles.find((p) => p.id === preference?.profileId);
+  const active = preferred ?? identity.profiles[0];
+
+  const profiles = identity.profiles.map((p) =>
+  p.id === active?.id && preference?.workspaceId && p.workspaces?.some((w) => w.id === preference.workspaceId) ?
+  { ...p, activeWorkspaceId: preference.workspaceId } :
+  p
+  );
+
+  return { identity: { ...identity, profiles }, activeProfileId: active?.id ?? '' };
+}
+
 export function AuthProvider({ children }: {children: React.ReactNode;}) {
   const navigate = useNavigate();
-  const [session, setSession] = useState<Session | null>(load);
+  const [session, setSession] = useState<Session | null>(null);
+  const [account, setAccount] = useState<AccountSession | null>(null);
+  const [status, setStatus] = useState<'loading' | 'ready'>('loading');
+
+  const establishSession = useCallback((next: AccountSession) => {
+    const identity = identityFromAccount(next);
+    setAccount(next);
+    setSession(sessionFrom(identity, loadPreference()));
+    return identity;
+  }, []);
+
+  const clear = useCallback(() => {
+    setAccount(null);
+    setSession(null);
+    savePreference(null);
+  }, []);
+
+  const refreshSession = useCallback(async () => {
+    try {
+      const next = await authApi.session();
+      establishSession(next);
+      return next;
+    } catch {
+      // 401 (signed out), 403 (suspended) or the API is unreachable: treat as signed out.
+      setAccount(null);
+      setSession(null);
+      return null;
+    } finally {
+      setStatus('ready');
+    }
+  }, [establishSession]);
 
   useEffect(() => {
-    if (session) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));else
-    window.localStorage.removeItem(STORAGE_KEY);
-  }, [session]);
+    void refreshSession();
+  }, [refreshSession]);
+
+  useEffect(() => {
+    if (!account || !session) return;
+    const active = session.identity.profiles.find((p) => p.id === session.activeProfileId);
+    if (active) savePreference({ profileId: active.id, workspaceId: active.activeWorkspaceId });
+  }, [account, session]);
 
   const signIn = useCallback((next: AuthUser, identity?: Identity) => {
     const base: Identity = identity ?? {
@@ -101,7 +175,15 @@ export function AuthProvider({ children }: {children: React.ReactNode;}) {
     [patchProfile]
   );
 
-  const signOut = useCallback(() => setSession(null), []);
+  const signOut = useCallback(async () => {
+    try {
+      if (account) await authApi.logout();
+    } catch {
+      // Already signed out on the server (401) or unreachable: clear locally either way.
+    } finally {
+      clear();
+    }
+  }, [account, clear]);
 
   const update = useCallback(
     (patch: Partial<AuthUser>) => {
@@ -138,6 +220,10 @@ export function AuthProvider({ children }: {children: React.ReactNode;}) {
       identity: session?.identity ?? null,
       profiles: session?.identity.profiles ?? [],
       activeWorkspace,
+      account,
+      status,
+      establishSession,
+      refreshSession,
       signIn,
       switchProfile,
       switchWorkspace,
@@ -146,7 +232,7 @@ export function AuthProvider({ children }: {children: React.ReactNode;}) {
       requireAuth,
       guardianState: guardianStateOf(user)
     }),
-    [user, session, activeWorkspace, signIn, switchProfile, switchWorkspace, signOut, update, requireAuth]
+    [user, session, activeWorkspace, account, status, establishSession, refreshSession, signIn, switchProfile, switchWorkspace, signOut, update, requireAuth]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

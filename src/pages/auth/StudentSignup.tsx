@@ -6,7 +6,7 @@ import { PhoneOtp } from '../../components/auth/PhoneOtp';
 import { Button } from '../../components/ui/Button';
 import { Label, Select, TextInput } from '../../components/ui/Field';
 import { useAuth, GUARDIAN_WINDOW_MS } from '../../contexts/AuthContext';
-import { examTargets, grades, subjects } from '../../data/classes';
+import { useLookups } from '../../hooks/useLookups';
 import { initialsOf } from '../../utils/format';
 import type { AuthUser } from '../../types';
 
@@ -27,7 +27,8 @@ export function StudentSignup() {
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
-  const [grade, setGrade] = useState('Grade 12');
+  const { gradeNames, examTargetNames, subjectNames } = useLookups();
+  const [grade, setGrade] = useState('A/L Year 1 (Grade 12)');
   const [exam, setExam] = useState('A/L 2027');
   const [picked, setPicked] = useState<string[]>(['Physics']);
   const [minor, setMinor] = useState(true);
@@ -103,7 +104,7 @@ export function StudentSignup() {
             <div>
               <Label htmlFor="sgrade">Grade</Label>
               <Select id="sgrade" value={grade} onChange={(e) => setGrade(e.target.value)}>
-                {grades.map((g) =>
+                {gradeNames.map((g) =>
               <option key={g}>{g}</option>
               )}
               </Select>
@@ -111,7 +112,7 @@ export function StudentSignup() {
             <div>
               <Label htmlFor="sexam">Exam target</Label>
               <Select id="sexam" value={exam} onChange={(e) => setExam(e.target.value)}>
-                {examTargets.map((g) =>
+                {examTargetNames.map((g) =>
               <option key={g}>{g}</option>
               )}
               </Select>
@@ -120,7 +121,7 @@ export function StudentSignup() {
           <fieldset>
             <legend className="mb-2 text-small font-medium text-ink">Subjects</legend>
             <div className="flex flex-wrap gap-2">
-              {subjects.map((s) => {
+              {subjectNames.map((s) => {
               const on = picked.includes(s);
               return (
                 <button

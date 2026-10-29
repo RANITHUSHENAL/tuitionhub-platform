@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRightIcon, ListIcon, MapIcon, SearchIcon, SlidersHorizontalIcon } from 'lucide-react';
-import { classes, cities, examTargets, mediums, subjects } from '../../data/classes';
+import { classes, cities } from '../../data/classes';
+import { useLookups } from '../../hooks/useLookups';
 import { ClassCard } from '../cards/ClassCard';
 import { ClassMap } from '../cards/ClassMap';
 import { Select } from '../ui/Field';
@@ -22,6 +23,8 @@ export function FindClassSection() {
   const [mode, setMode] = useState(ANY);
   const [day, setDay] = useState(ANY);
   const [view, setView] = useState<'list' | 'map'>('list');
+  // Subject, exam and medium options come from the API (contract §4.6).
+  const lookups = useLookups();
 
   const results = useMemo(
     () =>
@@ -84,9 +87,9 @@ export function FindClassSection() {
             
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <Filter label="Subject" value={subject} onChange={setSubject} options={subjects} />
-            <Filter label="Exam year" value={exam} onChange={setExam} options={examTargets} />
-            <Filter label="Medium" value={medium} onChange={setMedium} options={mediums} />
+            <Filter label="Subject" value={subject} onChange={setSubject} options={lookups.subjectNames} />
+            <Filter label="Exam year" value={exam} onChange={setExam} options={lookups.examTargetNames} />
+            <Filter label="Medium" value={medium} onChange={setMedium} options={lookups.mediumNames} />
             <Filter label="City" value={city} onChange={setCity} options={cities} />
             <Filter label="Mode" value={mode} onChange={setMode} options={modes} />
             <Filter label="Day" value={day} onChange={setDay} options={dayOptions} />

@@ -5,6 +5,7 @@ import { Button, LinkButton } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/DetailPanel';
 import { EmptyState } from '../../components/ui/States';
+import { PreviewBanner } from '../../components/ui/PreviewBanner';
 import { QuestionView, type Answer } from '../../components/exams/QuestionView';
 import { examById } from '../../data/exams';
 import type { ExamQuestion } from '../../types';
@@ -116,6 +117,9 @@ export function ExamTake() {
           }
         </div>
       </header>
+      <div className="mx-auto max-w-[1100px] px-5 pt-6">
+        <PreviewBanner />
+      </div>
 
       {stage === 'instructions' ?
       <main className="mx-auto max-w-2xl px-5 py-12">

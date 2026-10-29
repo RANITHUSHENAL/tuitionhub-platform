@@ -139,8 +139,10 @@ export function AccountMenu({ placement = 'down', compact = false }: {placement?
               </Link>
               <button
               role="menuitem"
-              onClick={() => {
-                signOut();
+              onClick={async () => {
+                setOpen(false);
+                // Ends the API session (POST /auth/logout) before leaving the signed-in area.
+                await signOut();
                 navigate('/');
               }}
               className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-small text-ink-soft transition-colors duration-150 ease-out hover:bg-surface-muted hover:text-ink">

@@ -1,6 +1,5 @@
 import React from 'react';
 import { CalendarIcon, ClipboardCheckIcon, FileQuestionIcon, LinkIcon } from 'lucide-react';
-import { LinkButton } from '../ui/Button';
 import { SectionHeading } from './SectionHeading';
 
 const points = [
@@ -33,12 +32,8 @@ export function StudentSection() {
         <SectionHeading
           eyebrow="For students"
           title="Your tuition week, in one place"
-          body="Your classes, schedule, attendance and results — plus classes recommended for your subjects and exam year, and study sessions near you. Sign up with just a phone number; under 18s connect a parent within 72 hours."
-          action={
-          <LinkButton to="/auth?mode=create&role=student" variant="secondary">
-              Create a student account
-            </LinkButton>
-          } />
+          body="Your classes, schedule, attendance and results — plus classes recommended for your subjects and exam year, and study sessions near you. Sign up with just a phone number; under 18s connect a parent within 72 hours." />
+          {/* No student sign-up in this version: students are added by their institute. */}
         
         <ul className="mt-10 grid gap-x-8 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
           {points.map((p) =>

@@ -18,12 +18,13 @@ const languages = ['සිංහල', 'தமிழ்', 'EN'];
 export function SiteHeader() {
   const [open, setOpen] = useState(false);
   const [lang, setLang] = useState('EN');
-  const { user, signOut } = useAuth();
+  const { user, account, signOut } = useAuth();
   const navigate = useNavigate();
 
-  const logout = () => {
-    signOut();
+  const logout = async () => {
     setOpen(false);
+    // Ends the API session (POST /auth/logout) before leaving the signed-in area.
+    await signOut();
     navigate('/');
   };
 
@@ -80,18 +81,15 @@ export function SiteHeader() {
                 <AccountMenu />
               </div>
             </> :
+          account ?
+          <LinkButton to="/account" size="sm" variant="secondary">
+              My account
+            </LinkButton> :
 
-          <>
-              <Link
-              to="/auth"
-              className="rounded-lg px-2 py-2 text-small font-medium text-ink-soft transition-colors duration-150 ease-out hover:text-ink">
-              
-                Sign in
-              </Link>
-              <LinkButton to="/auth?mode=create" size="sm">
-                Create account
-              </LinkButton>
-            </>
+          // No separate sign-up: signing in with a new number creates the account.
+          <LinkButton to="/auth" size="sm">
+              Sign in
+            </LinkButton>
           }
         </div>
 
@@ -126,21 +124,28 @@ export function SiteHeader() {
                   {roleLabel[user.role]} home
                 </LinkButton>
                 <button
-              onClick={logout}
+              onClick={() => void logout()}
               className="h-9 flex-1 rounded-xl border border-line bg-white text-small font-medium text-ink">
-              
+
+                  Sign out
+                </button>
+              </> :
+          account ?
+          <>
+                <LinkButton to="/account" size="sm" className="flex-1">
+                  My account
+                </LinkButton>
+                <button
+              onClick={() => void logout()}
+              className="h-9 flex-1 rounded-xl border border-line bg-white text-small font-medium text-ink">
+
                   Sign out
                 </button>
               </> :
 
-          <>
-                <LinkButton to="/auth?mode=create" size="sm" className="flex-1">
-                  Create account
-                </LinkButton>
-                <LinkButton to="/auth" size="sm" variant="secondary" className="flex-1">
-                  Sign in
-                </LinkButton>
-              </>
+          <LinkButton to="/auth" size="sm" className="flex-1">
+                Sign in
+              </LinkButton>
           }
           </div>
         </div> :

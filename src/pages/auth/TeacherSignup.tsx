@@ -7,7 +7,7 @@ import { InstituteLinkForm } from '../../components/teacher/InstituteLinkForm';
 import { Button } from '../../components/ui/Button';
 import { Label, TextInput } from '../../components/ui/Field';
 import { useAuth } from '../../contexts/AuthContext';
-import { subjects } from '../../data/classes';
+import { useLookups } from '../../hooks/useLookups';
 import type { TeachingWorkspace } from '../../types';
 import { initialsOf } from '../../utils/format';
 
@@ -21,6 +21,7 @@ export function TeacherSignup() {
   const [step, setStep] = useState<Step>('phone');
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
+  const { subjectNames } = useLookups();
   const [picked, setPicked] = useState<string[]>(['Physics']);
   const [how, setHow] = useState<How[]>(['independent']);
   const [requested, setRequested] = useState<string | null>(null);
@@ -98,7 +99,7 @@ export function TeacherSignup() {
           <fieldset>
             <legend className="mb-2 text-small font-medium text-ink">Subjects you teach</legend>
             <div className="flex flex-wrap gap-2">
-              {subjects.map((s) => {
+              {subjectNames.map((s) => {
               const on = picked.includes(s);
               return (
                 <button

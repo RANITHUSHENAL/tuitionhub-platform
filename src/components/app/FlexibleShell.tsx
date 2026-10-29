@@ -3,6 +3,7 @@ import { AppShell } from './AppShell';
 import { studentNav } from './navConfig';
 import { SiteHeader } from '../site/SiteHeader';
 import { SiteFooter } from '../site/SiteFooter';
+import { PreviewBanner } from '../ui/PreviewBanner';
 import { useAuth } from '../../contexts/AuthContext';
 
 /**
@@ -50,7 +51,10 @@ export function FlexibleShell({
           </div>
           {actions}
         </div>
-        <main className="pb-12">{children}</main>
+        <main className="pb-12">
+          <PreviewBanner />
+          {children}
+        </main>
       </div>
       <SiteFooter />
     </div>);

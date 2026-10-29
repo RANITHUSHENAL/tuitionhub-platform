@@ -17,15 +17,14 @@ export function FinalCtaSection() {
             <LinkButton to="/search" size="lg">
               Find a class
             </LinkButton>
-            <LinkButton to="/auth?mode=create" size="lg" variant="secondary">
-              Join TuitionHub
+            <LinkButton to="/auth" size="lg" variant="secondary">
+              Sign in or join
             </LinkButton>
           </div>
         </div>
         <div className="space-y-1 border-t border-line pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
           <p className="pb-1 text-caption text-ink-faint">For education providers</p>
           <ProviderLink href="#institutes" label="Run your institute with TuitionHub" />
-          <ProviderLink href="/auth/teacher" label="Start teaching with TuitionHub" />
         </div>
       </div>
     </section>);

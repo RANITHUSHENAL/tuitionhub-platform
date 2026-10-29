@@ -10,15 +10,8 @@ import { Label, Select, TextInput } from '../components/ui/Field';
 import { SegmentedControl } from '../components/ui/Tabs';
 import { EmptyState } from '../components/ui/States';
 import { Badge } from '../components/ui/Badge';
-import {
-  cities,
-  classes,
-  districts,
-  examTargets,
-  grades,
-  mediums,
-  subjects } from
-'../data/classes';
+import { cities, classes } from '../data/classes';
+import { useLookups } from '../hooks/useLookups';
 import { lkr } from '../utils/format';
 
 const anyValue = 'Any';
@@ -64,6 +57,8 @@ export function Search() {
   const [view, setView] = useState<'list' | 'map'>('list');
   const [sort, setSort] = useState('relevance');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Subject, grade, exam, medium and district options come from the API (contract §4.6).
+  const lookups = useLookups();
 
   const set = <K extends keyof Filters,>(key: K, value: Filters[K]) =>
   setFilters((f) => ({ ...f, [key]: value }));
@@ -119,11 +114,16 @@ export function Search() {
       null}
       </div>
 
-      <FilterSelect label="Subject" value={filters.subject} onChange={(v) => set('subject', v)} options={subjects} />
-      <FilterSelect label="Grade" value={filters.grade} onChange={(v) => set('grade', v)} options={grades} />
-      <FilterSelect label="Exam target" value={filters.examTarget} onChange={(v) => set('examTarget', v)} options={examTargets} />
-      <FilterSelect label="Medium" value={filters.medium} onChange={(v) => set('medium', v)} options={mediums} />
-      <FilterSelect label="District" value={filters.district} onChange={(v) => set('district', v)} options={districts} />
+      {lookups.failed ?
+    <p role="status" className="rounded-xl bg-state-warnBg px-3.5 py-2.5 text-caption text-ink">
+          Subject, grade and district filters couldn’t be loaded. Try again later.
+        </p> :
+    null}
+      <FilterSelect label="Subject" value={filters.subject} onChange={(v) => set('subject', v)} options={lookups.subjectNames} />
+      <FilterSelect label="Grade" value={filters.grade} onChange={(v) => set('grade', v)} options={lookups.gradeNames} />
+      <FilterSelect label="Exam target" value={filters.examTarget} onChange={(v) => set('examTarget', v)} options={lookups.examTargetNames} />
+      <FilterSelect label="Medium" value={filters.medium} onChange={(v) => set('medium', v)} options={lookups.mediumNames} />
+      <FilterSelect label="District" value={filters.district} onChange={(v) => set('district', v)} options={lookups.districts} />
       <FilterSelect label="City" value={filters.city} onChange={(v) => set('city', v)} options={cities} />
       <FilterSelect label="Mode" value={filters.mode} onChange={(v) => set('mode', v)} options={['Physical', 'Online', 'Hybrid']} />
       <FilterSelect label="Day" value={filters.day} onChange={(v) => set('day', v)} options={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} />

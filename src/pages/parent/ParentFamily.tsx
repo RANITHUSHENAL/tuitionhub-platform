@@ -13,7 +13,7 @@ import { connectChildPath } from '../../utils/parentSetup';
 import { TrustBadges } from '../../components/ui/TrustBadges';
 import { QrCode } from '../../components/ui/QrCode';
 import { useAuth } from '../../contexts/AuthContext';
-import { grades } from '../../data/classes';
+import { useLookups } from '../../hooks/useLookups';
 import { initialsOf } from '../../utils/format';
 
 interface Child {
@@ -44,6 +44,7 @@ export function ParentFamily() {
   const [codeOpen, setCodeOpen] = useState(false);
   const [familyCode, setFamilyCode] = useState(makeCode);
   const [newName, setNewName] = useState('');
+  const { gradeNames } = useLookups();
   const [newGrade, setNewGrade] = useState('Grade 9');
   const [request, setRequest] = useState(!isNew);
   const [toast, setToast] = useState<string | null>(null);
@@ -260,7 +261,7 @@ export function ParentFamily() {
           <div>
             <Label htmlFor="cgrade">Grade</Label>
             <Select id="cgrade" value={newGrade} onChange={(e) => setNewGrade(e.target.value)}>
-              {grades.map((g) =>
+              {gradeNames.map((g) =>
               <option key={g}>{g}</option>
               )}
             </Select>

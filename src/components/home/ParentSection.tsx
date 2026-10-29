@@ -13,8 +13,8 @@ export function ParentSection() {
           title="Stay informed about your child's tuition"
           body="Without chasing teachers or institutes for updates. One evening view: the next class, whether they have been going, the latest mark, and what you owe — for every child."
           action={
-          <LinkButton to="/auth?mode=create&role=parent" variant="secondary">
-              Create a parent account
+          <LinkButton to="/auth?role=parent" variant="secondary">
+              Parent sign in
             </LinkButton>
           } />
         

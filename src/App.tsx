@@ -21,11 +21,10 @@ import { ExamBuilder } from './pages/teacher/ExamBuilder';
 import { TeacherAnnouncements } from './pages/teacher/TeacherAnnouncements';
 import { TeacherPayments } from './pages/teacher/TeacherPayments';
 import { TeacherWorkspaces } from './pages/teacher/TeacherWorkspaces';
-import { TeacherSignup } from './pages/auth/TeacherSignup';
 import { InstituteTeachers } from './pages/institute/InstituteTeachers';
 import { Auth } from './pages/auth/Auth';
-import { StudentSignup } from './pages/auth/StudentSignup';
-import { ParentSignup } from './pages/auth/ParentSignup';
+import { Onboarding } from './pages/auth/Onboarding';
+import { AccountHome } from './pages/auth/AccountHome';
 import { ParentOverview } from './pages/parent/ParentOverview';
 import { ParentFamily } from './pages/parent/ParentFamily';
 import { GuardianVerification } from './pages/parent/GuardianVerification';
@@ -92,9 +91,13 @@ export function App() {
 
           {/* Authentication */}
           <Route path="/auth" element={<Auth />} />
-          <Route path="/auth/student" element={<StudentSignup />} />
-          <Route path="/auth/parent" element={<ParentSignup />} />
-          <Route path="/auth/teacher" element={<TeacherSignup />} />
+          {/* The prototype signup screens accept any code, so they are not routed (files kept for
+              later). Signing in with a new number creates the account. */}
+          <Route path="/auth/student" element={<Navigate to="/auth" replace />} />
+          <Route path="/auth/parent" element={<Navigate to="/auth" replace />} />
+          <Route path="/auth/teacher" element={<Navigate to="/auth" replace />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/account" element={<AccountHome />} />
 
           {/* Signed in — any role */}
           <Route path="/messages" element={<RequireAuth action="message"><Messages /></RequireAuth>} />

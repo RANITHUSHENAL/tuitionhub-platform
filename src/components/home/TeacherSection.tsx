@@ -26,10 +26,10 @@ export function TeacherSection() {
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <LinkButton to="/auth/teacher" size="lg">
-                I’m a teacher
+              <LinkButton to="/auth?role=teacher" size="lg">
+                Teacher sign in
               </LinkButton>
-              <span className="text-caption text-ink-faint">Free to start. No institute needed.</span>
+              <span className="text-caption text-ink-faint">Your institute adds you as a teacher.</span>
             </div>
           </div>
 
