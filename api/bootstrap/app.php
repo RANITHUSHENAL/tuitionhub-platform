@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\DomainRuleException;
+use App\Exceptions\ServiceBusyException;
 use App\Http\Middleware\NoStoreResponses;
 use App\Otp\Exceptions\AccountSuspendedException;
 use App\Otp\Exceptions\InvalidOtpException;
@@ -32,8 +33,26 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
+        // Expected outcomes, not faults (D-022): never written to the log. Wrapped database errors
+        // carry SQL and MySQL's duplicate-key values (which can include a full phone number), so
+        // business-rule exceptions must not reach the log either.
+        $exceptions->dontReport([
+            DomainRuleException::class,
+            InvalidOtpException::class,
+            OtpThrottledException::class,
+            AccountSuspendedException::class,
+            ServiceBusyException::class,
+        ]);
+
         // Contract v0.4 §1.3–§1.4. CSRF mismatches keep Laravel's 419 ("CSRF token mismatch.").
         $exceptions->render(fn (DomainRuleException $exception) => $exception->toResponse());
+
+        // Concurrency retries exhausted or lock wait timed out; nothing was committed (D-022).
+        $exceptions->render(fn (ServiceBusyException $exception) => response()->json(
+            ['message' => $exception->getMessage()],
+            503,
+            ['Retry-After' => '1'],
+        ));
 
         $exceptions->render(fn (InvalidOtpException $exception) => response()->json([
             'message' => $exception->getMessage(),

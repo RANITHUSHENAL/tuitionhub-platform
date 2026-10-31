@@ -5,8 +5,8 @@ namespace App\Services;
 use App\Audit\AuditAction;
 use App\Audit\AuditLogger;
 use App\Models\User;
+use App\Support\Transactions;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\DB;
 
 /**
  * PATCH /api/v1/me (contract v0.5 §4.5; FD-1, FD-2). The caller's own name only.
@@ -23,8 +23,8 @@ class UserProfileService
      */
     public function updateName(User $user, string $name): User
     {
-        return DB::transaction(function () use ($user, $name) {
-            // Lock order: users first.
+        return Transactions::retrying(function () use ($user, $name) {
+            // Pattern U (D-022): only the caller's own users row is locked.
             $user = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
 
             if ($user->status !== 'active') {

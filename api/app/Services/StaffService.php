@@ -10,8 +10,8 @@ use App\Models\InstituteStaff;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\LocalClock;
+use App\Support\Transactions;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Adds and ends institute staff together with their institute_staff role, atomically
@@ -37,7 +37,7 @@ class StaffService
 
         $joinedOn = LocalClock::date($joinedOn);
 
-        return DB::transaction(function () use ($institute, $user, $position, $joinedOn) {
+        return Transactions::retrying(function () use ($institute, $user, $position, $joinedOn) {
             $institute = Institute::query()->whereKey($institute->getKey())->lockForUpdate()->firstOrFail();
 
             $staff = new InstituteStaff;
@@ -83,7 +83,7 @@ class StaffService
     {
         $leftOn = LocalClock::date($leftOn ?? LocalClock::today());
 
-        DB::transaction(function () use ($staff, $leftOn) {
+        Transactions::retrying(function () use ($staff, $leftOn) {
             // Lock order: institutes → institute_staff → user_roles (inside revoke).
             $institute = Institute::query()->whereKey($staff->institute_id)->lockForUpdate()->firstOrFail();
             $staff = InstituteStaff::query()->whereKey($staff->getKey())->lockForUpdate()->firstOrFail();

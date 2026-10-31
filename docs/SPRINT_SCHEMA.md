@@ -811,10 +811,11 @@ Purpose: a single-use, expiring code that lets a guardian link to a student (C6;
   - `guardian_invitations_accepted_chk CHECK ((status = 'accepted' AND accepted_at IS NOT NULL AND accepted_by_user_id IS NOT NULL) OR (status <> 'accepted' AND accepted_at IS NULL AND accepted_by_user_id IS NULL))`.
   - `guardian_invitations_revoked_chk CHECK ((status = 'revoked' AND revoked_at IS NOT NULL AND revoked_by_user_id IS NOT NULL) OR (status <> 'revoked' AND revoked_at IS NULL AND revoked_by_user_id IS NULL))`.
   - `guardian_invitations_accept_before_expiry_chk CHECK (accepted_at IS NULL OR accepted_at <= expires_at)`.
+- **Lock order (corrected by D-022, D-1):** every write here follows Pattern I: lock the managing **institute** row first, then the **student** row, then the **invitation** row, each by primary key. Users rows are taken only with shared locks (foreign-key checks, audit rows, an explicit `FOR SHARE` re-check), never exclusively and never before the institute. **No range locking reads or range updates** on `guardian_invitations` or `student_guardians`: under REPEATABLE READ they lock index gaps, and two transactions for different students in the same gap can deadlock on their inserts. Sets of rows (for example the pending invitations for a student and phone) are found with a plain read taken after the institute lock (the institute lock serialises every writer of that institute's invitations and links, so the snapshot is current), then changed one row at a time by primary key. This replaces the earlier wording ("lock … the pending invitations with `SELECT … FOR UPDATE`"; "select the invitation by `code_hash` `FOR UPDATE`", then lock the student), which contradicted the student-first rule in G4.3.
 - **Application rules** (Decided where marked "contract"; otherwise PROPOSAL):
   1. **Create** (§9.1; staff or admin of the managing institute). Everything runs in one transaction, plus the audit row:
-     - Lock the student row and the pending invitations for (student, phone) with `SELECT … FOR UPDATE`.
-     - Mark any pending invitation whose `expires_at` has passed as `expired`, which clears its `pending_flag`.
+     - Lock the institute row, then the student row (`SELECT … FOR UPDATE` by primary key). Find the pending invitations for (student, phone) with a plain read.
+     - Mark any pending invitation whose `expires_at` has passed as `expired` (update by primary key), which clears its `pending_flag`.
      - If a non-expired pending invitation remains → `409` (contract).
      - Generate the code (Q29):
        - 8 characters drawn with a cryptographically secure source (`random_int`) from the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (30 symbols; no `0 O 1 I L U`; about 39 bits).
@@ -828,21 +829,21 @@ Purpose: a single-use, expiring code that lets a guardian link to a student (C6;
      - **Normalise the code** (Q29):
        - Upper-case it and remove spaces and `-`.
        - If the result is not exactly 8 characters from the alphabet, return the generic `422` without querying.
-       - Otherwise compute the HMAC and select the invitation by `code_hash` `FOR UPDATE`.
+       - Otherwise compute the HMAC and find the invitation's id, student and institute by `code_hash` with a **plain read, before the transaction** (no lock).
      - Redemption is rate-limited (contract §9.2: proposed 5 attempts per user per 15 min; `429`).
+     - **Then lock, in this order:** the institute row, the student row, the invitation row (each by primary key), and finally the caller's and the inviter's users rows with a shared lock (`FOR SHARE`, in primary-key order). This serialises concurrent acceptances for the same student (Q25).
      - **Recheck under the lock:** status is `pending`, now < `expires_at`, the caller has `phone_verified_at` set, and the caller's phone equals `guardian_phone` (contract).
        - If the invitation has expired, it is marked `expired`.
        - Unknown, expired or used codes and phone mismatches all return one **generic `422`** (contract).
      - If an active link already exists for this student and guardian → `409` (contract; also the DB unique key).
-     - Create `guardian_profiles` if missing (contract).
-     - **Lock the student row** (`SELECT … FOR UPDATE`). This serialises concurrent acceptances for the same student (Q25).
+     - Create `guardian_profiles` if missing (contract). A concurrent first acceptance by the same user is resolved by `guardian_profiles_user_id_unique`, then a locking re-read by `user_id`.
      - Insert the `student_guardians` row with `linked_by_user_id` = **inviter**, `linked_at` = now, `invitation_id` (contract).
        - `is_primary = 1` if the student has **no active primary** link; otherwise `0` (Q25).
      - Set the invitation to `accepted` / `accepted_at` / `accepted_by_user_id`.
      - Audit `guardian_invitation.accepted` and `guardian_link.created` (contract).
      - Link creation and invitation consumption commit together or not at all.
      - In `log` mode, `phone_verified_at` is **not** real phone verification (C6).
-  3. **Revoke** (§9.3): lock the row. Only `pending` → `revoked`, setting `revoked_at`/`revoked_by_user_id`; otherwise `409` (contract). Audited.
+  3. **Revoke** (§9.3): lock the institute row, the student row, then the invitation row (by primary key). Only `pending` → `revoked`, setting `revoked_at`/`revoked_by_user_id`; otherwise `409` (contract). Audited.
   4. **Never log the plaintext code.** The accept request body and the create response are excluded from logs, audit rows and exception reports (contract §1.1).
   5. **HMAC key** (Q29):
      - `GUARDIAN_INVITE_HMAC_KEY` is a dedicated secret (32 random bytes, base64), read through config and kept only in local, ignored `.env` files. It is never committed, printed or logged; `.env.example` holds an empty placeholder.
@@ -906,13 +907,13 @@ Purpose: the guardian→student link. An **active** row (`revoked_at IS NULL`) i
   - **Re-linking always creates a new row** through a new invitation. Revoked rows stay as history.
   - This replaces the draft's unique `(student_id, guardian_id)` with reactivation, which would overwrite revocation history.
   - **Revoke** (§9.4; institute admin or `super_admin`). Everything runs in one transaction:
-    - **Lock the student row first** (`SELECT … FOR UPDATE`), then the link row.
+    - **Lock the institute row, then the student row** (`SELECT … FOR UPDATE`), then the link row by primary key (found with a plain read after the locks; D-022).
     - Set `revoked_at` = now and `revoked_by_user_id`, which clears `active_flag` and `primary_flag`.
     - Promote a new primary if needed (below).
     - Audit `guardian_link.revoked`.
   - **Access** is checked against an active row on **every request** (contract §3, §9.4: "lost immediately"). Nothing is cached in the session.
   - **Primary guardian** (Q25, approved D-015; contract v0.3 §9.2, §9.4):
-    - **The student row is locked** (`SELECT … FOR UPDATE`, taken before any link row) for **every** primary-guardian creation, revocation and promotion. The student row is always locked first, so concurrent operations on the same student run one at a time and cannot deadlock.
+    - **The student row is locked** (`SELECT … FOR UPDATE`, taken before any link row) for **every** primary-guardian creation, revocation and promotion, right after the managing institute's row (D-022 Pattern I). Institute, then student, is always the first pair of locks, so concurrent operations on the same student run one at a time and cannot deadlock.
     - **First active guardian becomes primary.** On acceptance, with the student row locked, the new link gets `is_primary = 1` if the student has no active primary. `guardian_link.created` then records old primary link ID `null` and the new link's ID (Q37).
     - **Promotion on revocation:**
       - When the primary link is revoked, the same transaction (student row locked) first sets `revoked_at`, which frees `primary_flag`.

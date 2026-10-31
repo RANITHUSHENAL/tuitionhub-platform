@@ -10,9 +10,9 @@ use App\Models\TeacherAssignment;
 use App\Models\TeacherProfile;
 use App\Models\User;
 use App\Support\LocalClock;
+use App\Support\Transactions;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -48,7 +48,7 @@ class TeacherAssignmentService
             throw ValidationException::withMessages(['joined_on' => 'The joined on date must not be in the future.']);
         }
 
-        return DB::transaction(function () use ($actor, $institute, $teacher, $joinedOn) {
+        return Transactions::retrying(function () use ($actor, $institute, $teacher, $joinedOn) {
             // Lock order: institutes → teacher_institute.
             $institute = Institute::query()->whereKey($institute->getKey())->lockForUpdate()->firstOrFail();
 
@@ -91,7 +91,7 @@ class TeacherAssignmentService
     {
         $leftOn = LocalClock::date($leftOn ?? LocalClock::today());
 
-        DB::transaction(function () use ($assignment, $leftOn) {
+        Transactions::retrying(function () use ($assignment, $leftOn) {
             // Lock order: institutes → teacher_institute.
             $institute = Institute::query()->whereKey($assignment->institute_id)->lockForUpdate()->firstOrFail();
             $assignment = TeacherAssignment::query()->whereKey($assignment->getKey())->lockForUpdate()->firstOrFail();

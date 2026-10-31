@@ -28,14 +28,14 @@ final class FakeOtpDriver implements OtpDriver
         }
     }
 
-    public function send(string $phone, string $code): void
+    public function send(#[\SensitiveParameter] string $phone, #[\SensitiveParameter] string $code): void
     {
         $this->assertAvailable();
 
         $this->sent[$phone][] = $code;
     }
 
-    public function lastCodeFor(string $phone): ?string
+    public function lastCodeFor(#[\SensitiveParameter] string $phone): ?string
     {
         $codes = $this->sent[$phone] ?? [];
 

@@ -27,7 +27,7 @@ final class LogOtpDriver implements OtpDriver
         }
     }
 
-    public function send(string $phone, string $code): void
+    public function send(#[\SensitiveParameter] string $phone, #[\SensitiveParameter] string $code): void
     {
         $this->assertAvailable();
 

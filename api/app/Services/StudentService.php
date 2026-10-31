@@ -9,8 +9,8 @@ use App\Models\Institute;
 use App\Models\StudentProfile;
 use App\Models\User;
 use App\Support\Lookups;
+use App\Support\Transactions;
 use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
@@ -38,8 +38,8 @@ class StudentService
      */
     public function create(User $actor, Institute $institute, array $attributes): StudentProfile
     {
-        return DB::transaction(function () use ($actor, $institute, $attributes) {
-            // Lock order: institutes first (no users row is locked here).
+        return Transactions::retrying(function () use ($actor, $institute, $attributes) {
+            // Pattern I (D-022): institutes first; users rows only shared (creator and audit foreign keys).
             $institute = Institute::query()->whereKey($institute->getKey())->lockForUpdate()->firstOrFail();
 
             Gate::forUser($actor)->authorize('createStudent', $institute);

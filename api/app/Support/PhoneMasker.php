@@ -10,7 +10,7 @@ use InvalidArgumentException;
  */
 final class PhoneMasker
 {
-    public static function mask(string $phone): string
+    public static function mask(#[\SensitiveParameter] string $phone): string
     {
         if (preg_match('/^[+]947[0-9]{8}$/', $phone) !== 1) {
             throw new InvalidArgumentException('Only E.164 Sri Lankan mobile numbers can be masked.');
