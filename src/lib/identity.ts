@@ -32,7 +32,8 @@ export function identityFromAccount(account: AccountSession): Identity {
       ...base,
       id: `institute:${role.institute_uuid}:${role.role}`,
       role: 'institute',
-      detail: `${role.institute_name ?? 'Institute'} · ${role.role === 'institute_admin' ? 'Admin' : 'Staff'}`
+      detail: `${role.institute_name ?? 'Institute'} · ${role.role === 'institute_admin' ? 'Admin' : 'Staff'}`,
+      institute: { uuid: role.institute_uuid, name: role.institute_name ?? 'Institute', role: role.role }
     });
   }
 

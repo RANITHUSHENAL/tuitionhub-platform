@@ -40,7 +40,7 @@ export function Hero() {
           <h1 className="mt-5 text-display text-ink">
             Know your child went.
             <br />
-            Know what they scored.
+            Stay connected to every class.
             <br />
             <span className="text-forest">Know where every payment goes.</span>
           </h1>

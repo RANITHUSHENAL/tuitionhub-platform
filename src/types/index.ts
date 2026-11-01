@@ -152,9 +152,18 @@ export interface Identity {
   profiles: AuthUser[];
 }
 
+/** The institute behind an `institute` profile, from GET /auth/session (display hint only). */
+export interface InstituteMembership {
+  uuid: string;
+  name: string;
+  role: 'institute_admin' | 'institute_staff';
+}
+
 export interface AuthUser {
   id: string;
   role: Role;
+  /** institute only */
+  institute?: InstituteMembership;
   /** teacher only */
   workspaces?: TeachingWorkspace[];
   activeWorkspaceId?: string;

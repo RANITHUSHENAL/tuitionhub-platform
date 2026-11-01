@@ -11,7 +11,7 @@ const settingsPath: Record<Role, string> = {
   student: '/student/profile',
   parent: '/parent/profile',
   teacher: '/teacher/workspaces',
-  institute: '/institute/teachers'
+  institute: '/institute/profile'
 };
 
 /**
@@ -136,6 +136,15 @@ export function AccountMenu({ placement = 'down', compact = false }: {placement?
               
                 <SettingsIcon className="h-4 w-4" />
                 Profile & settings
+              </Link>
+              <Link
+              role="menuitem"
+              to="/account"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-small text-ink-soft transition-colors duration-150 ease-out hover:bg-surface-muted hover:text-ink">
+
+                <UserIcon className="h-4 w-4" />
+                Your account
               </Link>
               <button
               role="menuitem"

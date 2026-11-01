@@ -33,6 +33,7 @@ import { StudentSchedule } from './pages/student/StudentSchedule';
 import { StudentAttendance } from './pages/student/StudentAttendance';
 import { StudentProfile } from './pages/student/StudentProfile';
 import { InstituteOverview } from './pages/institute/InstituteOverview';
+import { InstituteProfile } from './pages/institute/InstituteProfile';
 import { InstituteClasses } from './pages/institute/InstituteClasses';
 import { InstituteStudents } from './pages/institute/InstituteStudents';
 import { InstituteAttendance } from './pages/institute/InstituteAttendance';
@@ -116,6 +117,7 @@ export function App() {
           <Route path="/parent/announcements" element={parent(<ParentAnnouncements />)} />
 
           <Route path="/institute" element={operator(<InstituteOverview />)} />
+          <Route path="/institute/profile" element={operator(<InstituteProfile />)} />
           <Route path="/institute/classes" element={operator(<InstituteClasses />)} />
           <Route path="/institute/students" element={operator(<InstituteStudents />)} />
           <Route path="/institute/attendance" element={operator(<InstituteAttendance />)} />

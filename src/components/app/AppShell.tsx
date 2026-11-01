@@ -25,6 +25,7 @@ export function AppShell({
   subtitle,
   actions,
   context,
+  sampleData = true,
   children
 
 
@@ -38,7 +39,7 @@ export function AppShell({
 
 
 
-}: {role: string;accountName: string;accountDetail: string;initials: string;nav: ShellNavItem[];title: string;subtitle?: string;actions?: React.ReactNode; /** e.g. the teacher's current workspace, shown under the logo */context?: string;children: React.ReactNode;}) {
+}: {role: string;accountName: string;accountDetail: string;initials: string;nav: ShellNavItem[];title: string;subtitle?: string;actions?: React.ReactNode; /** e.g. the teacher's current workspace, shown under the logo */context?: string; /** false only on screens fully powered by the API; they drop the sample-data banner */sampleData?: boolean;children: React.ReactNode;}) {
   const { user } = useAuth();
   const location = useLocation();
   const primary = nav.filter((n) => !n.group);
@@ -168,8 +169,8 @@ export function AppShell({
           </nav>
 
           <main className="px-5 py-6 lg:px-8 lg:py-8">
-            {/* Every dashboard page still shows prototype sample data (no page reads the API yet). */}
-            <PreviewBanner />
+            {/* Pages still on prototype sample data keep the banner; API-backed pages pass sampleData={false}. */}
+            {sampleData ? <PreviewBanner /> : null}
             {children}
           </main>
         </div>

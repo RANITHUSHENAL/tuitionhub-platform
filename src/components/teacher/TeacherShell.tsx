@@ -8,13 +8,15 @@ export function TeacherShell({
   title,
   subtitle,
   actions,
+  sampleData = true,
   children
 
 
 
 
 
-}: {title: string;subtitle?: string;actions?: React.ReactNode;children: React.ReactNode;}) {
+
+}: {title: string;subtitle?: string;actions?: React.ReactNode;sampleData?: boolean;children: React.ReactNode;}) {
   const { user, activeWorkspace } = useAuth();
   return (
     <AppShell
@@ -26,7 +28,8 @@ export function TeacherShell({
       context={activeWorkspace?.name}
       title={title}
       subtitle={subtitle}
-      actions={actions}>
+      actions={actions}
+      sampleData={sampleData}>
       
       {children}
     </AppShell>);

@@ -3,6 +3,7 @@ import {
   BanknoteIcon,
   BarChart3Icon,
   BriefcaseIcon,
+  BuildingIcon,
   CalendarIcon,
   ClipboardCheckIcon,
   GaugeIcon,
@@ -43,6 +44,7 @@ export const studentNav: ShellNavItem[] = [
  */
 export const instituteNav: ShellNavItem[] = [
 { to: '/institute', label: 'Dashboard', icon: icon(GaugeIcon), end: true },
+{ to: '/institute/profile', label: 'Institute profile', icon: icon(BuildingIcon) },
 { to: '/institute/classes', label: 'Classes', icon: icon(LayersIcon) },
 { to: '/institute/students', label: 'Students', icon: icon(UsersIcon) },
 { to: '/institute/teachers', label: 'Teachers', icon: icon(UserRoundCogIcon) },
