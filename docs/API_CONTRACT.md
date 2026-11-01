@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.6.1 |
-| **Date** | 2026-11-01 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29) |
+| **Version** | `v1` draft 0.7 |
+| **Date** | 2026-11-01 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29; 0.6.1: 2026-11-01) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
-| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). |
+| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). Guardian links (§9) follow decisions E2-1–E2-9 (D-023). |
 | **Schema source** | `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema), adapted as listed in §2. |
 
 > **Demo-money boundary.** Nothing in this contract moves real money. All payments are `provider: "mock"`, all commission rows are demo accruals, and there are no settlement, payout, refund-processing or live-gateway endpoints. See §11.
@@ -71,7 +71,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 { "message": "This role is already granted.", "reason": "role_already_granted" }
 ```
 
-- **`409` state conflicts** always include `reason`. Codes defined so far: `role_already_granted`, `role_not_granted`, `owner_admin_revocation_forbidden`, `already_active`, `not_active`. Later endpoints add their own codes here.
+- **`409` state conflicts** always include `reason`. Codes defined so far: `role_already_granted`, `role_not_granted`, `owner_admin_revocation_forbidden`, `already_active`, `not_active`, `invitation_pending`, `invitation_not_pending`, `link_already_active` (§9, E2-8). Later endpoints add their own codes here.
 - **`403` with `reason`:** `not_eligible` (for example, onboarding prerequisites not met) and `institute_suspended` (a write to a suspended institute by anyone other than `super_admin`, §3). Other `403`s return `message` only.
 - **Invalid values** detected by a business rule (unknown district, position or role, role/scope mismatch, invalid date) use the `422` `errors` shape above, keyed by the offending field, with no `reason`.
 
@@ -96,7 +96,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 | `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …), with a `reason` code (§1.3) |
 | `419` | CSRF token missing or invalid on a stateful SPA request (§1.2). The SPA should fetch `/sanctum/csrf-cookie` again and retry once. |
 | `422` | Validation error |
-| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.3 and §8.1–§8.2 share **60 requests per minute per user**; `GET /lookups` allows **60 per minute per IP**. The OTP endpoints (§4.1, §4.2) have only their own limits. |
+| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.3, §8.1–§8.2 and §9 share **60 requests per minute per user**; `GET /lookups` allows **60 per minute per IP**. The OTP endpoints (§4.1, §4.2) have only their own limits. Accepting an invitation (§9.2) is also limited to **5 attempts per 15 minutes per user** (E2-7). |
 | `503` | A required service is unavailable or not configured (e.g. OTP driver or OTP key, §4.1; invitation key, §9.1). Fails closed; never degrades to an insecure fallback. **Also** `{"message":"The service is busy. Please try again."}` with `Retry-After: 1` when a write lost a database concurrency race: a deadlock still failing after 3 attempts, or a row lock not obtained within 10 s (D-022). Nothing was saved, so the client may repeat the request. |
 
 ### 1.5 Data types
@@ -776,7 +776,13 @@ Student shape (`Student`, institute view):
 }
 ```
 
-- **Rules:** `code` is returned **only in this response**, shown once in the protected institute UI, and is never logged or stored in plaintext (stored as `code_hash`). Single-use; proposed expiry 48 h (configurable). A pending invitation for the same student and phone → `409`. Audited without the code.
+- **Rules:** `code` is returned **only in this response**, shown once in the protected institute UI, and is never logged or stored in plaintext (stored as `code_hash`). Single-use; expiry 48 h (configurable). A pending invitation for the same student and phone → `409` `reason: invitation_pending`; an expired one is retired (stored as `expired`) and replaced. Audited without the code.
+- **Fields:**
+  - `guardian_phone`: required; local `0771234567` or E.164 `+94771234567`, stored as E.164 (E2-6). Any other format (spaces, hyphens, `94…` without `+`, landlines) → `422`. The inviter's own phone → `422` on `guardian_phone` (E2-4).
+  - `relationship`: required, exactly one of the values above.
+  - Any other field (`code`, `status`, `expires_at`, `student_uuid`, `institute_id`, `invited_by_user_id`, `is_primary`, …) → `422` (§1.6).
+- **Authorization** (before validation, §1.4): admins and active staff of the managing institute. `super_admin` → `403` (not a member, as in §8.1). Anyone else, including teacher-only callers → `404`. A **suspended** institute → `403` `reason: institute_suspended`. The service locks the institute row, then the student row, and authorizes again (D-023).
+- **Audit:** `guardian_invitation.created` (§13), with the masked phone only.
 - **Code generation and format:**
   - 8 characters drawn from a cryptographically secure random source, using the unambiguous alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (no `0 O 1 I L U`).
   - The code is displayed and returned as `XXXX-XXXX`.
@@ -790,7 +796,7 @@ Student shape (`Student`, institute view):
 
 ### 9.2 `POST /api/v1/guardian-invitations/accept`
 
-- **Permission:** `authenticated`, throttled (proposed 5 attempts per user per 15 min).
+- **Permission:** `authenticated`, throttled: **5 attempts per user per 15 min**, every attempt counting (E2-7).
 - **Request:**
 
 ```json
@@ -813,25 +819,29 @@ Student shape (`Student`, institute view):
 - **Code normalisation:**
   - Before hashing, the submitted code is upper-cased and **spaces and hyphens are removed**.
   - Anything that is not then exactly 8 characters from the §9.1 alphabet gets the same generic `422`.
-- **Phone matching:** the caller must be authenticated, with `phone_verified_at` set, and the account phone must equal `guardian_phone` exactly (E.164). A mismatch gets the generic `422`.
+- **Phone matching:** the caller must be authenticated, with `phone_verified_at` set, and the account phone must equal `guardian_phone` exactly (E.164). A mismatch gets the generic `422`, and the invitation stays pending.
+- **Request:** `code` is a required string of at most 32 characters; a missing, non-string or longer value gets the normal `422` on `code`. Any other field → `422` (§1.6).
+- **The inviter** can never accept their own invitation: generic `422` (E2-4).
+- **Order of checks:** a suspended account → `403`; then the invitation's state and expiry, the phone and the inviter (generic `422`); **only then** a suspended institute → `403` `reason: institute_suspended` (E2-2), so the suspension is revealed only to the invited guardian; then an existing active link → `409`. An expired invitation is saved as `expired` even though the response is the generic `422`.
 - **Initial primary guardian:**
   - In the same transaction, with the **student row locked**, the new link becomes primary (`is_primary = true`) only if the student has no active primary guardian; otherwise it is not primary.
   - When the new link becomes primary, `guardian_link.created` records the previous primary link ID (`null`) and the new primary link ID (§13).
   - There is no endpoint to choose or change the primary manually.
 - **Errors:**
   - `401`.
-  - `422` for an unknown, expired, used or malformed code, **or** a phone mismatch (single generic message).
-  - `409` if an active link already exists.
+  - `403` (suspended account; `institute_suspended`).
+  - `422` for an unknown, expired, used, revoked or malformed code, a phone mismatch, an unverified phone, or the inviter accepting (single generic message: `{"message":"The invitation code is invalid or has expired.","errors":{"code":["The invitation code is invalid or has expired."]}}`).
+  - `409` `reason: link_already_active` if an active link already exists; the invitation stays pending.
   - `429`.
-  - `503` if the invitation key is not configured.
+  - `503` if the invitation key is not configured (checked before the code).
 
 ### 9.3 `POST /api/v1/guardian-invitations/{invitationUuid}/revoke`
 
-- **Permission:** the inviter (while still staff/admin of the same institute), or `super_admin`.
-- **Request:** none.
+- **Permission:** the inviter (while still staff/admin of the same institute), **any admin of the same institute** (E2-5), or `super_admin` (also while the institute is suspended). Other staff → `403`. Everyone else, including an inviter who has left the institute and teacher-only callers → `404`. A suspended institute → `403` `reason: institute_suspended` for anyone but `super_admin`.
+- **Request:** none; any body or query field → `422` (§1.6), checked after authorization.
 - **Success `200`:** `{ "data": { "uuid": "uuid", "status": "revoked", "revoked_at": "…" } }`
-- **Rules:** Only `pending` invitations can be revoked (`409` otherwise). An invitation past `expires_at` counts as expired (§9.1), so it also gets `409`. Records `revoked_by_user_id`. Audited.
-- **Errors:** `401`, `403`, `404`, `409`.
+- **Rules:** Only `pending` invitations can be revoked (`409` `reason: invitation_not_pending` otherwise). An invitation past `expires_at` counts as expired (§9.1), so it also gets `409`, and is saved as `expired`. Records `revoked_by_user_id`. Audited (`guardian_invitation.revoked`). An invitation sent by staff who later left stays valid until it expires, unless an admin revokes it (E2-9).
+- **Errors:** `401`, `403`, `404`, `409`, `422`.
 
 ### 9.4 `DELETE /api/v1/students/{studentUuid}/guardian-links/{guardianUuid}`
 
@@ -845,7 +855,8 @@ Student shape (`Student`, institute view):
   - If no active link remains, the student has no primary guardian.
   - The `guardian_link.revoked` audit row records the old primary link ID and the new primary link ID (`null` if none) (§13).
   - Invoices already issued keep their `billed_guardian_id` (§11.2).
-- **Errors:** `401`, `403`, `404` (no active link).
+- **Authorization** (before anything else): staff of the institute → `403`; unrelated and teacher-only callers → `404`; a suspended institute → `403` `reason: institute_suspended` except for `super_admin`. `guardianUuid` is resolved only after that: malformed, unknown, not a guardian, and no active link are the same `404`. Any body or query field → `422`.
+- **Errors:** `401`, `403`, `404` (no active link), `422`.
 
 ### 9.5 `GET /api/v1/parents/me/children`
 
@@ -864,11 +875,13 @@ Student shape (`Student`, institute view):
       ]
     }
   ],
-  "meta": {}
+  "meta": { "current_page": 1, "per_page": 25, "total": 1, "last_page": 1 }
 }
 ```
 
-- **Errors:** `401`.
+- **Rules:** scoped in the query to the caller's own active links, re-read on every request (a revoked link disappears on the next request). Ordered by `linked_at`, then internal link order. Students of a **suspended** institute are included (E2-3). A user with no guardian profile gets an empty page.
+- **`active_enrollments`** is always `[]` until the enrolment tables (§8.3) exist (E2-1); no class is shown before then.
+- **Errors:** `401`, `422` (pagination).
 
 ---
 
@@ -1260,6 +1273,13 @@ Written to `audit_logs` (immutable, no soft deletes) with actor, target, old/new
 | `institute.status_changed` | `institute` | `status` | `status` |
 | `teacher.assigned` | `teacher_assignment` | — | `teacher_uuid`, `institute_uuid`, `status`, `joined_on` |
 | `student.created` | `student_profile` | — | `student_uuid`, `institute_uuid`, `grade_code`, `medium_code`, `exam_target_code` — never the name or date of birth |
+| `guardian_invitation.created` | `guardian_invitation` | — | `invitation_uuid`, `student_uuid`, `institute_uuid`, `relationship`, `guardian_phone_masked`, `status`, `expires_at` — never the code, its hash or the full phone |
+| `guardian_invitation.accepted` | `guardian_invitation` | `status` | `invitation_uuid`, `student_uuid`, `status` |
+| `guardian_invitation.revoked` | `guardian_invitation` | `status` | `invitation_uuid`, `student_uuid`, `status` |
+| `guardian_link.created` | `student_guardian` | `primary_link_id` (`null`), only when the new link becomes primary | `student_uuid`, `guardian_uuid` (user), `relationship`, `is_primary`; `primary_link_id` (the new link) when it becomes primary |
+| `guardian_link.revoked` | `student_guardian` | `primary_link_id` (the revoked link), only when it was primary | `student_uuid`, `guardian_uuid` (user), `relationship`; `primary_link_id` (the promoted link or `null`) when it was primary |
+
+Guardian events are recorded against the student's managing institute. The actor is the caller (the guardian for `accepted`/`created` links).
 
 ---
 
@@ -1301,11 +1321,11 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 8.2 | GET | `/api/v1/institutes/{instituteUuid}/students` | same-institute staff/admin (not super_admin; incl. suspended institutes) |
 | 8.3 | POST | `/api/v1/classes/{classUuid}/enrollments` | same-institute staff/admin |
 | 8.4 | GET | `/api/v1/classes/{classUuid}/enrollments` | assigned teacher, same-institute staff/admin |
-| 9.1 | POST | `/api/v1/students/{studentUuid}/guardian-invitations` | managing-institute staff/admin |
-| 9.2 | POST | `/api/v1/guardian-invitations/accept` | authenticated, phone match |
-| 9.3 | POST | `/api/v1/guardian-invitations/{invitationUuid}/revoke` | inviter (same institute), super_admin |
+| 9.1 | POST | `/api/v1/students/{studentUuid}/guardian-invitations` | managing-institute staff/admin (not super_admin); not while suspended |
+| 9.2 | POST | `/api/v1/guardian-invitations/accept` | authenticated, phone match, 5 attempts per 15 min; not while the institute is suspended |
+| 9.3 | POST | `/api/v1/guardian-invitations/{invitationUuid}/revoke` | inviter (same institute), same-institute admin, super_admin |
 | 9.4 | DELETE | `/api/v1/students/{studentUuid}/guardian-links/{guardianUuid}` | managing-institute admin, super_admin |
-| 9.5 | GET | `/api/v1/parents/me/children` | authenticated (active links) |
+| 9.5 | GET | `/api/v1/parents/me/children` | authenticated (active links; incl. suspended institutes) |
 | 10.1 | POST | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, institute manager |
 | 10.2 | GET | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, same-institute staff/admin |
 | 10.3 | POST | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin |
@@ -1335,3 +1355,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 0.5 draft | 2026-10-29 | **E1a: shared HTTP rules, `PATCH /me`, institutes, lookups (D-020; founder decisions FD-1–FD-10).** §1.3: pagination `meta` has exactly four keys and no `links`; `page`/`per_page` bounds; deterministic ordering; new `403` reason `institute_suspended` (FD-9). §1.4: the `401` → suspended `403` → malformed-UUID `404` → hidden `404` / related `403` → `422` order; authorization before validation. §1.6: unknown fields rejected with `422` (FD-5); free-text character rules; audit failure rolls the write back; unchanged writes are not audited. §3: suspended institutes readable by admins and staff (FD-3); unrelated callers still `404`. §4.5 **new** `PATCH /api/v1/me` (FD-1, FD-10 name rules) audited as **new** event `user.profile_updated` without the name (FD-2); closes §14.1 gap. §4.6 **new** public `GET /api/v1/lookups` (FD-8) with the FD-7 seed values (Q21) and the 25 districts. §5.1–§5.3: field limits, filters, ordering, district canonicalisation. §5.4: teacher-only callers `403` (FD-4). §5.5: status change by admin `403`; suspended institute writes `403 institute_suspended`; re-authorization under row lock; audit payload rules (no raw contact details). §7/§7.1: examples aligned with the approved lookups (subject `COMBINED_MATH` "Combined Mathematics", `AL2` "A/L Year 2 (Grade 13)", `local` "Local (National)"); 15 subjects in §4.6. §1.4/§4.6: general rate limits — 60 requests/min per user on the authenticated §4.5/§5 endpoints, 60/min per IP on `GET /lookups`; OTP limits unchanged. §13: actor/IP/user-agent binding, e-mail addresses denied, payload table. §15: rows 4.5, 4.6 and labels. |
 | 0.6 draft | 2026-10-29 | **E1b: teacher and student endpoints (D-021).** §4.5: person-name rules also cover teacher `display_name` (100) and student `full_name` (150; rejected, never truncated). §6.1: field rules; `display_name` required only on creation; partial updates (omitted = unchanged, `null` clears `headline`/`bio`, `years_experience` not nullable); not audited (FD-6). §6.2: field rules (malformed or unknown `teacher_uuid` → `422`; `joined_on` a real date, today or earlier in `Asia/Colombo`, future → `422`); authorization order incl. `institute_suspended`; `409 already_active`; former assignments do not block; `teacher.assigned` payload. §6.3: `status` filter, order, teacher-only `403` (FD-4), suspended institutes readable (FD-3). §6.4: **deferred** until the classes tables exist. §8.1: field rules (exact lookup codes, DOB not in the future in `Asia/Colombo`, server-owned/identity/document fields → `422`); `super_admin` and teacher-only `403`; `institute_suspended`; `student.created` payload without name or DOB. §8.2: route-institute scope, filters, order, `super_admin` `403`, `active_guardian_count` counts active links only. §1.4: the 60/min per-user limit also covers §6.1–§6.3 and §8.1–§8.2. §13: `teacher.assigned` and `student.created` payloads. §15: labels. |
 | 0.6.1 draft | 2026-11-01 | **H1 hardening (D-022).** §1.4: `503` also means "service busy" (`{"message":"The service is busy. Please try again."}`, `Retry-After: 1`) when a write still deadlocks after 3 attempts or waits more than 10 s for a row lock; nothing is saved. §4.1: the OTP challenge is committed before the code is sent; a failed send retires the challenge. No other endpoint behaviour changed. |
+| 0.7 draft | 2026-11-01 | **E2: guardian invitations, linking, revocation and children (D-023; decisions E2-1 – E2-9).** §1.3: `409` reasons `invitation_pending`, `invitation_not_pending`, `link_already_active` (E2-8). §1.4: the 60/min per-user limit covers §9; accept also 5 attempts per 15 min per user (E2-7). §9.1: phone formats (E2-6), self-invite `422` (E2-4), field rules, `super_admin` `403`, teacher-only `404`, `institute_suspended`, expired pending invitations retired and replaced, expiry 48 h. §9.2: request rules, inviter's own invitation → generic `422` (E2-4), order of checks with `institute_suspended` after the code checks (E2-2), generic `422` body, `link_already_active`, lazy expiry saved. §9.3: same-institute admins may revoke (E2-5), other staff `403`, a departed inviter `404`, `invitation_not_pending`, invitations from departed staff stay valid (E2-9). §9.4: authorization order, uniform `404`, no body. §9.5: order, pagination `meta`, suspended institutes included (E2-3), `active_enrollments: []` until enrolments exist (E2-1). §13: payloads for the five guardian events. §15 labels. |

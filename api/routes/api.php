@@ -2,11 +2,14 @@
 
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\GuardianInvitationController;
+use App\Http\Controllers\Api\V1\GuardianLinkController;
 use App\Http\Controllers\Api\V1\InstituteController;
 use App\Http\Controllers\Api\V1\InstituteTeacherController;
 use App\Http\Controllers\Api\V1\LookupController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MyInstitutesController;
+use App\Http\Controllers\Api\V1\ParentChildrenController;
 use App\Http\Controllers\Api\V1\StudentController;
 use App\Http\Controllers\Api\V1\TeacherProfileController;
 use App\Http\Middleware\BindAuditContext;
@@ -15,7 +18,7 @@ use App\Http\Middleware\RequireStatefulFrontend;
 use Illuminate\Support\Facades\Route;
 
 /*
-| /api/v1 — contract v0.6. Session (cookie) auth only: bearer tokens are disabled (D-019).
+| /api/v1 — contract v0.7. Session (cookie) auth only: bearer tokens are disabled (D-019).
 */
 
 Route::prefix('v1')->group(function () {
@@ -58,5 +61,13 @@ Route::prefix('v1')->group(function () {
             Route::get('institutes/{institute}/teachers', [InstituteTeacherController::class, 'index']);
             Route::post('institutes/{institute}/students', [StudentController::class, 'store']);
             Route::get('institutes/{institute}/students', [StudentController::class, 'index']);
+
+            // E2 (§9.1–§9.5). Accepting is also limited to 5 attempts per 15 minutes per user (E2-7).
+            Route::post('students/{student}/guardian-invitations', [GuardianInvitationController::class, 'store']);
+            Route::post('guardian-invitations/accept', [GuardianInvitationController::class, 'accept'])
+                ->middleware('throttle:guardian-invite-accept');
+            Route::post('guardian-invitations/{invitation}/revoke', [GuardianInvitationController::class, 'revoke']);
+            Route::delete('students/{student}/guardian-links/{guardianUuid}', [GuardianLinkController::class, 'destroy']);
+            Route::get('parents/me/children', ParentChildrenController::class);
         });
 });

@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Models\Concerns\GuardsGeneratedColumns;
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Concerns\SerializesUtcDates;
+use Carbon\CarbonImmutable;
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +20,16 @@ class GuardianInvitation extends Model
 {
     use GuardsGeneratedColumns, HasPublicUuid, SerializesUtcDates;
 
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_ACCEPTED = 'accepted';
+
+    public const STATUS_REVOKED = 'revoked';
+
+    public const STATUS_EXPIRED = 'expired';
+
+    public const RELATIONSHIPS = ['father', 'mother', 'guardian', 'uncle', 'aunt'];
+
     protected function casts(): array
     {
         return [
@@ -30,6 +42,19 @@ class GuardianInvitation extends Model
     protected function generatedColumns(): array
     {
         return ['pending_flag'];
+    }
+
+    /**
+     * Lazy expiry (contract §9.1; Q30): past expires_at the invitation is expired, whatever its
+     * stored status. A stored `pending` never overrides an expired timestamp.
+     */
+    public function effectiveStatus(?DateTimeInterface $now = null): string
+    {
+        $now ??= CarbonImmutable::now('UTC');
+
+        return $this->status === self::STATUS_PENDING && $this->expires_at->lessThanOrEqualTo($now)
+            ? self::STATUS_EXPIRED
+            : $this->status;
     }
 
     /**

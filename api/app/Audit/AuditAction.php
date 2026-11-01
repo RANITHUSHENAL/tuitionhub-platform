@@ -3,7 +3,7 @@
 namespace App\Audit;
 
 /**
- * Audit event names from contract v0.6 §13. Only events with an allowlist in AuditPayload can be recorded.
+ * Audit event names from contract v0.7 §13. Only events with an allowlist in AuditPayload can be recorded.
  */
 final class AuditAction
 {
@@ -28,4 +28,14 @@ final class AuditAction
     public const TEACHER_ASSIGNED = 'teacher.assigned';
 
     public const STUDENT_CREATED = 'student.created';
+
+    public const GUARDIAN_INVITATION_CREATED = 'guardian_invitation.created';
+
+    public const GUARDIAN_INVITATION_ACCEPTED = 'guardian_invitation.accepted';
+
+    public const GUARDIAN_INVITATION_REVOKED = 'guardian_invitation.revoked';
+
+    public const GUARDIAN_LINK_CREATED = 'guardian_link.created';
+
+    public const GUARDIAN_LINK_REVOKED = 'guardian_link.revoked';
 }

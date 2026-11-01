@@ -2,6 +2,8 @@
 
 use App\Exceptions\DomainRuleException;
 use App\Exceptions\ServiceBusyException;
+use App\Guardians\Exceptions\GuardianInviteUnavailableException;
+use App\Guardians\Exceptions\InvalidInvitationCodeException;
 use App\Http\Middleware\NoStoreResponses;
 use App\Otp\Exceptions\AccountSuspendedException;
 use App\Otp\Exceptions\InvalidOtpException;
@@ -42,6 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
             OtpThrottledException::class,
             AccountSuspendedException::class,
             ServiceBusyException::class,
+            InvalidInvitationCodeException::class,
         ]);
 
         // Contract v0.4 §1.3–§1.4. CSRF mismatches keep Laravel's 419 ("CSRF token mismatch.").
@@ -71,6 +74,18 @@ return Application::configure(basePath: dirname(__DIR__))
         ));
 
         $exceptions->render(fn (OtpUnavailableException $exception) => response()->json(
+            ['message' => $exception->getMessage()],
+            503,
+        ));
+
+        // Contract v0.7 §9.2: one generic 422 for every unusable invitation code (D-023).
+        $exceptions->render(fn (InvalidInvitationCodeException $exception) => response()->json([
+            'message' => $exception->getMessage(),
+            'errors' => ['code' => [$exception->getMessage()]],
+        ], 422));
+
+        // §9.1: GUARDIAN_INVITE_HMAC_KEY missing; fails closed for invitation create and accept only.
+        $exceptions->render(fn (GuardianInviteUnavailableException $exception) => response()->json(
             ['message' => $exception->getMessage()],
             503,
         ));

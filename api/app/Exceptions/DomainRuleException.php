@@ -39,6 +39,12 @@ class DomainRuleException extends RuntimeException
 
     public const INSTITUTE_SUSPENDED = 'institute_suspended';
 
+    public const INVITATION_PENDING = 'invitation_pending';
+
+    public const INVITATION_NOT_PENDING = 'invitation_not_pending';
+
+    public const LINK_ALREADY_ACTIVE = 'link_already_active';
+
     /** 409 state conflicts, rendered with their reason code. */
     private const CONFLICTS = [
         self::ROLE_ALREADY_GRANTED => 'This role is already granted.',
@@ -46,6 +52,9 @@ class DomainRuleException extends RuntimeException
         self::OWNER_ADMIN_REVOCATION_FORBIDDEN => 'The institute owner always keeps the institute admin role.',
         self::ALREADY_ACTIVE => 'This record is already active.',
         self::NOT_ACTIVE => 'This record is not active.',
+        self::INVITATION_PENDING => 'A pending invitation already exists for this phone number.',
+        self::INVITATION_NOT_PENDING => 'This invitation is no longer pending.',
+        self::LINK_ALREADY_ACTIVE => 'This guardian is already linked to the student.',
     ];
 
     /** 422 invalid values: reason => [field, message]. */
