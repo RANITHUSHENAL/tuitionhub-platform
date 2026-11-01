@@ -703,6 +703,76 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Deferred:** the Pint style findings in `tests/Feature/Schema/Concerns/SchemaFixtures.php` and `app/Audit/AuditLogBuilder.php` (`fully_qualified_strict_types`, `ordered_imports`). Both predate M3 and are left for a separate style commit.
 - **Open:** E3 services and endpoints (VP-76–VP-78, VP-82, VP-83), including the proposed §8.5 withdraw and §10.6 cancel endpoints.
 
+## D-026 — E3a classes, fee versions, enrolments, teacher classes and catalogue — **Verified by automated tests 2026-11-01**
+
+- **Scope:** ten endpoints. Contract → **v0.8**. **No migrations, no packages**; nothing ran against `tuitionhub`.
+
+  | § | Endpoint |
+  |---|---|
+  | §7.1 | `POST /institutes/{uuid}/classes` |
+  | §7.2 | `GET /institutes/{uuid}/classes` |
+  | §7.3 | `GET /classes/{uuid}` (public route) |
+  | §7.4 | `PATCH /classes/{uuid}` |
+  | §7.5 | `GET /public/classes` (public route) |
+  | §6.4 | `GET /me/teacher/classes` |
+  | §8.3 | `POST /classes/{uuid}/enrollments` |
+  | §8.4 | `GET /classes/{uuid}/enrollments` |
+  | §8.5 | `POST /enrollments/{uuid}/withdraw` |
+- **Authorization:**
+  - **Policies:** `InstitutePolicy::createClass` and `::viewClasses`; new `ClassPolicy` (`view`, `update`, `viewEnrollments`, `enroll`) and `ClassEnrollmentPolicy::withdraw` (delegates to `enroll`).
+  - **Assigned teacher:** `TenantAccess::isAssignedTeacher` requires `classes.teacher_id` to be the caller's profile **and** an active assignment at the class's institute. An ended assignment loses access to private class data and rosters at once.
+  - **Order — visibility first** (review fix, see below): a caller who cannot see the class gets `404`; one who can see it but may not act gets `403`; an allowed caller at a suspended institute gets `institute_suspended` (except super_admin where allowed). Every service locks the institute row and authorizes again.
+- **Lock order (D-022/D-024):**
+  - Class create locks `institutes` only (the class and fee rows are new).
+  - Update: `institutes` → `classes`; the open fee version is closed by primary key.
+  - Enrol: `institutes` → `classes`.
+  - Withdraw: `institutes` → `classes` → `class_enrollments` (by id).
+  - Teacher assignments, active counts, duplicates and attendance are plain reads after the locks.
+  - All writes run in `Transactions::retrying()`. The active-enrolment unique key maps to `409 already_active` without the database error. Tested through the executed SQL.
+- **Accepted choices** (founders, 2026-11-01, in the E3a corrections brief):
+  1. **`super_admin`:** `403` on §7.1, §8.3 and §8.5 (not a member, as in §8.1). It may update classes (§7.4, contract) and read rosters (§8.4).
+  2. **Teacher-only callers:** `403` on the §7.2 institute list (FD-4). `404` on every endpoint of a class they cannot see, including private class pages, rosters and writes (see the visibility fix below).
+  3. **Public visibility** also needs the institute to be active (§3: suspension never reveals). The public class page reads an optional SPA session through the sanctum guard, and a suspended account counts as anonymous.
+  4. **Statuses:**
+     - Archived is final: any update → `409 class_archived`.
+     - Other disallowed transitions → `409 invalid_status_transition`.
+     - Enrolling into a draft or archived class → `409 not_active`.
+  5. **Dates:**
+     - Changing `starts_on`/`ends_on` must keep every active enrolment's `enrolled_on` inside the window (`422`).
+     - `enrolled_on` defaults to today (`Asia/Colombo`), as the sprint draft says.
+     - `withdrawn_on` is required and may not be in the future (`422`): a future date would free the place before the student leaves.
+  6. **Limits:**
+     - `max_students` is 1–10,000; a full class → `409 class_full`; a future enrolment counts at once (D-024).
+     - The fee is a string with exactly 2 decimals, greater than 0, LKR only, with exactly four keys. A `fee` in §7.4 always appends a version, and `previous_effective_to` is audited.
+  7. **Ordering:**
+     - §7.2: `title`, then id.
+     - §6.4: `starts_on`, then `title`, then id.
+     - §8.4: student `full_name`, then id.
+     - §7.5 is neutral: `starts_on`, `title`, `uuid`; no boost or rank.
+  8. **`AuditLoggerTest`** (VP-57) used `class.created` as its example of an action without an allowlist. It now uses a fictional action name, since E3a gives `class.created` an allowlist.
+- **Audit payloads** (§13): the class snapshot never includes the description, only `description_changed`; enrolment events never include the student's name.
+- **Review fix — consistent hidden-resource 404 (visibility first):**
+  - `ClassPolicy::update` and `::enroll`, and therefore `ClassEnrollmentPolicy::withdraw`, now check visibility (`canSeePrivateData`) first.
+  - A caller who cannot see the class gets `404`, including an unassigned teacher at the same institute. Previously that caller got `403`, which revealed that the private class existed.
+  - The assigned teacher and `super_admin` (on enrol and withdraw) can see the class, so they get `403`. Staff can see it, so they get `403` on update.
+  - Tested as a matrix: unassigned teacher 404 on show, roster, update, enrol and withdraw; assigned teacher 200 on show and roster, 403 on the writes; unrelated users 404 everywhere, also with invalid bodies.
+  - Contract §7.4, §8.3 and §8.5 wording updated within v0.8.
+- **Review fix — authorization before validation:**
+  - `EnrollmentService::withdraw` checked the `withdrawn_on` format and future date (`422`) before the transactional `Gate::authorize` (`403`/`404`). Both now run after authorization, inside the transaction. `EnrollmentService::enroll`'s `enrolled_on` format check moved the same way.
+  - Tested: a hidden enrolment with a future or malformed `withdrawn_on` is `404` over HTTP, and an `AuthorizationException` (404), not a `ValidationException`, from a direct service call. An allowed caller still gets the `422`.
+- **Carried forward:**
+  - **E3b (sessions and attendance):** the D-024 date boundaries apply.
+    - Session creation needs an `active` class, and `session_date` must lie within the class's `starts_on`–`ends_on`.
+    - Attendance is allowed only for enrolments active on the session's date (`enrolled_on <= d < withdrawn_on`), never for cancelled or future sessions.
+  - **E4 (invoices):** an invoice needs an **active** enrolment (contract §11.2). A withdrawn, or zero-length, enrolment cannot be invoiced.
+- **Tests:** 66 new; `php artisan test` → **563 passed (7054 assertions)** on two consecutive runs (497 existing + 66):
+  - create class 11, show 6, institute list 4, update 10, catalogue 3 (including the 60/min limit), teacher classes 2, visibility and validation order 5;
+  - enrol 10, roster 2, withdraw 7;
+  - lock order, re-authorization and the unique-key backstop 6.
+
+  `AuditLoggerTest` was adjusted as in item 8.
+- **Open:** E3b (sessions §10.1–§10.2, cancel §10.6, attendance §10.3–§10.5); real two-process concurrency (E2c); applying M3 to `tuitionhub` (separate approval).
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.

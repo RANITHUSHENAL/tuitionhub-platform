@@ -27,6 +27,8 @@ use App\Otp\LogOtpDriver;
 use App\Otp\OtpCodeHasher;
 use App\Otp\OtpDriver;
 use App\Otp\UnavailableOtpDriver;
+use App\Policies\ClassEnrollmentPolicy;
+use App\Policies\ClassPolicy;
 use App\Policies\GuardianInvitationPolicy;
 use App\Policies\InstitutePolicy;
 use App\Policies\StudentPolicy;
@@ -110,6 +112,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Institute::class, InstitutePolicy::class);
         Gate::policy(StudentProfile::class, StudentPolicy::class);
         Gate::policy(GuardianInvitation::class, GuardianInvitationPolicy::class);
+        Gate::policy(TuitionClass::class, ClassPolicy::class);
+        Gate::policy(ClassEnrollment::class, ClassEnrollmentPolicy::class);
 
         // Outside production, mass-assigning a guarded attribute, lazy loading and reading a
         // missing attribute throw instead of failing silently.

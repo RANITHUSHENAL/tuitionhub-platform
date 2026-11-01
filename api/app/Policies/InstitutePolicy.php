@@ -130,6 +130,33 @@ class InstitutePolicy
     }
 
     /**
+     * POST /institutes/{uuid}/classes (§7.1): this institute's admins only (the owner holds the
+     * role). Staff, teacher-only callers and super_admin (not a member) get 403; a suspended
+     * institute refuses the write.
+     *
+     * @throws DomainRuleException INSTITUTE_SUSPENDED
+     */
+    public function createClass(User $user, Institute $institute): Response
+    {
+        if ($this->access->isInstituteAdmin($user, $institute)) {
+            $this->assertActive($institute);
+
+            return Response::allow();
+        }
+
+        return $this->memberOnlyDenial($user, $institute);
+    }
+
+    /**
+     * GET /institutes/{uuid}/classes (§7.2): super_admin, admins and active staff, also while the
+     * institute is suspended (FD-3). Teacher-only callers get 403 (FD-4) and use §6.4 instead.
+     */
+    public function viewClasses(User $user, Institute $institute): Response
+    {
+        return $this->view($user, $institute);
+    }
+
+    /**
      * Institute admin, or institute staff (role and active staff row).
      */
     private function isMember(User $user, Institute $institute): bool

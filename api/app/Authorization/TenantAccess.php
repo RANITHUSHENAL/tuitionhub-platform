@@ -8,6 +8,8 @@ use App\Models\Role;
 use App\Models\StudentGuardian;
 use App\Models\StudentProfile;
 use App\Models\TeacherAssignment;
+use App\Models\TeacherProfile;
+use App\Models\TuitionClass;
 use App\Models\User;
 use App\Models\UserRole;
 use Illuminate\Database\Eloquent\Builder;
@@ -75,6 +77,31 @@ class TenantAccess
     {
         return $this->isActiveUser($user)
             && $this->activeAssignments($user)->where('institute_id', $institute->getKey())->exists();
+    }
+
+    /**
+     * The class's assigned teacher (classes.teacher_id) who also still has an active assignment at
+     * the class's institute (contract §3). An ended assignment grants nothing, even while the class
+     * still names the teacher.
+     */
+    public function isAssignedTeacher(User $user, TuitionClass $class): bool
+    {
+        $teacherId = $this->teacherProfileId($user);
+
+        return $teacherId !== null
+            && (int) $class->teacher_id === $teacherId
+            && $this->isActiveUser($user)
+            && TeacherAssignment::query()->active()
+                ->where('teacher_id', $teacherId)
+                ->where('institute_id', $class->institute_id)
+                ->exists();
+    }
+
+    public function teacherProfileId(User $user): ?int
+    {
+        $id = TeacherProfile::query()->where('user_id', $user->getKey())->value('id');
+
+        return $id === null ? null : (int) $id;
     }
 
     public function hasActiveGuardianLink(User $user, StudentProfile $student): bool

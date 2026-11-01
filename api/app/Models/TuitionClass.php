@@ -4,8 +4,10 @@ namespace App\Models;
 
 use App\Models\Concerns\HasPublicUuid;
 use App\Models\Concerns\SerializesUtcDates;
+use App\Support\LocalClock;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -36,6 +38,38 @@ class TuitionClass extends Model
             'ends_on' => 'immutable_date:Y-m-d',
             'public_listing' => 'boolean',
         ];
+    }
+
+    /**
+     * Public catalogue visibility (contract §7.3, §7.5): active, opted in, and the institute active.
+     * A suspended institute never reveals that its classes exist (§3).
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopePubliclyListed(Builder $query): void
+    {
+        $query->where('status', self::STATUS_ACTIVE)
+            ->where('public_listing', true)
+            ->whereHas('institute', fn (Builder $institute) => $institute->where('status', Institute::STATUS_ACTIVE));
+    }
+
+    public function isPubliclyListed(): bool
+    {
+        return self::query()->whereKey($this->getKey())->publiclyListed()->exists();
+    }
+
+    /**
+     * `current_fee` (D-024 Q54): the version in force today (Asia/Colombo); before any is, the
+     * earliest future one. Needs the feeVersions relation loaded.
+     */
+    public function currentFeeVersion(): ?ClassFeeVersion
+    {
+        $today = LocalClock::today();
+        $versions = $this->feeVersions->sortBy(fn (ClassFeeVersion $version) => $version->effective_from->format('Y-m-d'));
+
+        return $versions->first(fn (ClassFeeVersion $version) => $version->effective_from->format('Y-m-d') <= $today
+                && ($version->effective_to === null || $version->effective_to->format('Y-m-d') >= $today))
+            ?? $versions->first(fn (ClassFeeVersion $version) => $version->effective_from->format('Y-m-d') > $today);
     }
 
     /**

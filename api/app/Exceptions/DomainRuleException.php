@@ -45,6 +45,16 @@ class DomainRuleException extends RuntimeException
 
     public const LINK_ALREADY_ACTIVE = 'link_already_active';
 
+    public const CLASS_FULL = 'class_full';
+
+    public const CLASS_ARCHIVED = 'class_archived';
+
+    public const INVALID_STATUS_TRANSITION = 'invalid_status_transition';
+
+    public const MAX_STUDENTS_BELOW_ACTIVE = 'max_students_below_active';
+
+    public const ATTENDANCE_RECORDED = 'attendance_recorded';
+
     /** 409 state conflicts, rendered with their reason code. */
     private const CONFLICTS = [
         self::ROLE_ALREADY_GRANTED => 'This role is already granted.',
@@ -55,6 +65,11 @@ class DomainRuleException extends RuntimeException
         self::INVITATION_PENDING => 'A pending invitation already exists for this phone number.',
         self::INVITATION_NOT_PENDING => 'This invitation is no longer pending.',
         self::LINK_ALREADY_ACTIVE => 'This guardian is already linked to the student.',
+        self::CLASS_FULL => 'This class is full.',
+        self::CLASS_ARCHIVED => 'This class is archived and cannot be changed.',
+        self::INVALID_STATUS_TRANSITION => 'This status change is not allowed.',
+        self::MAX_STUDENTS_BELOW_ACTIVE => 'The class has more active enrolments than this capacity.',
+        self::ATTENDANCE_RECORDED => 'Attendance is already recorded on or after this date.',
     ];
 
     /** 422 invalid values: reason => [field, message]. */
