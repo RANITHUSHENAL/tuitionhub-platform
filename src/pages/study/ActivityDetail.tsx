@@ -13,7 +13,7 @@ import { joinLabel } from '../../components/cards/ActivityCard';
 export function ActivityDetail() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { user, requireAuth, guardianState } = useAuth();
+  const { user, requireAuth } = useAuth();
   const activity = activityById(id);
   const [joined, setJoined] = useState(!!user && activity?.status === 'joined');
   const [toast, setToast] = useState(false);
@@ -40,10 +40,6 @@ export function ActivityDetail() {
       return;
     }
     if (!requireAuth(requestFlow ? 'request' : 'join', `/study?activity=${activity.id}&intent=join`)) return;
-    if (guardianState === 'restricted') {
-      navigate('/student/connect-guardian');
-      return;
-    }
     setJoined(true);
     setToast(true);
   };

@@ -13,12 +13,12 @@ import { ParentSection } from '../components/home/ParentSection';
 import { StudentSection } from '../components/home/StudentSection';
 import { TeacherSection } from '../components/home/TeacherSection';
 import { InstituteSection } from '../components/home/InstituteSection';
-import { StudySection } from '../components/home/StudySection';
 import { FinalCtaSection } from '../components/home/FinalCtaSection';
 
 /**
  * Public, guest-first landing. Story: Discover → Choose → Understand →
- * Manage → Teach → Study. Signed-in users go to their own home.
+ * Manage → Teach. Signed-in users go to their own home. (Study is out of
+ * sprint scope under C7; StudySection is kept but not rendered.)
  */
 export function Home() {
   const { user } = useAuth();
@@ -37,7 +37,6 @@ export function Home() {
         <StudentSection />
         <TeacherSection />
         <InstituteSection />
-        <StudySection />
         <FinalCtaSection />
       </main>
       <SiteFooter />

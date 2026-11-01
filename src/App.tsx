@@ -10,7 +10,6 @@ import { Institutes } from './pages/Institutes';
 import { Teachers } from './pages/Teachers';
 import { Blueprint } from './pages/Blueprint';
 import { DesignSystem } from './pages/DesignSystem';
-import { Messages } from './pages/Messages';
 import { TeacherHome } from './pages/teacher/TeacherHome';
 import { TeacherClasses } from './pages/teacher/TeacherClasses';
 import { TeacherClassDetail } from './pages/teacher/TeacherClassDetail';
@@ -41,10 +40,6 @@ import { ExamTake } from './pages/student/ExamTake';
 import { StudentMarks } from './pages/student/StudentMarks';
 import { StudentProfile } from './pages/student/StudentProfile';
 import { ConnectGuardian } from './pages/student/ConnectGuardian';
-import { StudyDiscover } from './pages/study/StudyDiscover';
-import { ActivityDetail } from './pages/study/ActivityDetail';
-import { CreateActivity } from './pages/study/CreateActivity';
-import { CircleDetail } from './pages/study/CircleDetail';
 import { InstituteOverview } from './pages/institute/InstituteOverview';
 import { InstituteClasses } from './pages/institute/InstituteClasses';
 import { InstituteStudents } from './pages/institute/InstituteStudents';
@@ -84,8 +79,6 @@ export function App() {
           <Route path="/class/:id" element={<ClassDetail />} />
           <Route path="/institutes" element={<Institutes />} />
           <Route path="/teachers" element={<Teachers />} />
-          <Route path="/study" element={<StudyDiscover />} />
-          <Route path="/study/activity/:id" element={<ActivityDetail />} />
           <Route path="/blueprint" element={<Blueprint />} />
           <Route path="/design-system" element={<DesignSystem />} />
 
@@ -99,10 +92,9 @@ export function App() {
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/account" element={<AccountHome />} />
 
-          {/* Signed in — any role */}
-          <Route path="/messages" element={<RequireAuth action="message"><Messages /></RequireAuth>} />
-          <Route path="/study/create" element={student(<CreateActivity />, 'create')} />
-          <Route path="/study/circles/:id" element={student(<CircleDetail />)} />
+          {/* Study and Messages are out of sprint scope (C7): files kept, direct URLs go home. */}
+          <Route path="/study/*" element={<Navigate to="/" replace />} />
+          <Route path="/messages" element={<Navigate to="/" replace />} />
 
           <Route path="/student" element={student(<StudentHome />)} />
           <Route path="/student/schedule" element={student(<StudentSchedule />)} />

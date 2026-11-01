@@ -6,7 +6,7 @@ const points = [
 {
   icon: <CalendarIcon className="h-4.5 w-4.5" />,
   title: 'One schedule',
-  body: 'Classes from every institute you attend, plus the study sessions you have joined.'
+  body: 'Classes from every institute you attend, in one weekly view.'
 },
 {
   icon: <LinkIcon className="h-4.5 w-4.5" />,
@@ -32,7 +32,7 @@ export function StudentSection() {
         <SectionHeading
           eyebrow="For students"
           title="Your tuition week, in one place"
-          body="Your classes, schedule, attendance and results — plus classes recommended for your subjects and exam year, and study sessions near you. Sign up with just a phone number; under 18s connect a parent within 72 hours." />
+          body="Your classes, schedule, attendance and results — plus classes recommended for your subjects and exam year. Your institute registers students; a parent links using an invitation code." />
           {/* No student sign-up in this version: students are added by their institute. */}
         
         <ul className="mt-10 grid gap-x-8 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">

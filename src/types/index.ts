@@ -165,8 +165,6 @@ export interface AuthUser {
   phoneVerified: boolean;
   isMinor?: boolean;
   guardianLink?: GuardianLink;
-  /** epoch ms — end of the 72-hour guardian connection window */
-  guardianDeadline?: number;
   guardianName?: string;
   verification?: VerificationState;
   childrenLinked?: number;

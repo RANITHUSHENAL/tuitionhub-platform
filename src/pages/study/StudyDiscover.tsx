@@ -24,7 +24,7 @@ const filters = [
 
 export function StudyDiscover() {
   const navigate = useNavigate();
-  const { user, requireAuth, guardianState } = useAuth();
+  const { user, requireAuth } = useAuth();
   const [params, setParams] = useSearchParams();
   const [view, setView] = useState<'map' | 'list'>('map');
   const [filter, setFilter] = useState('all');
@@ -40,10 +40,6 @@ export function StudyDiscover() {
     }
     const intent = a.visibility === 'request' ? 'request' : 'join';
     if (!requireAuth(intent, `/study?activity=${a.id}&intent=join`)) return;
-    if (guardianState === 'restricted') {
-      navigate('/student/connect-guardian');
-      return;
-    }
     setJoined((j) => [...j, a.id]);
   };
 

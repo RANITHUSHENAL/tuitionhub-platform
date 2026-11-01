@@ -7,8 +7,8 @@ const columns = [
   links: [
   { to: '/search', label: 'Find a class' },
   { to: '/class/cls-01', label: 'Class profile' },
-  { to: '/study', label: 'Study activities' },
-  { to: '/study/circles/cir-01', label: 'Study Circles' }]
+  { to: '/institutes', label: 'Institutes' },
+  { to: '/teachers', label: 'Teachers' }]
 
 },
 {
@@ -33,9 +33,7 @@ const columns = [
   title: 'Product',
   links: [
   { to: '/blueprint', label: 'Product blueprint' },
-  { to: '/design-system', label: 'Design system' },
-  { to: '/study/create', label: 'Create an activity' },
-  { to: '/messages', label: 'Messages' }]
+  { to: '/design-system', label: 'Design system' }]
 
 }];
 
@@ -51,7 +49,6 @@ export function SiteFooter() {
             </p>
             <p className="mt-2 max-w-xs text-small text-ink-soft">
               Discover your class. Manage your tuition. Track progress. Pay with confidence.
-              Find people to learn with.
             </p>
             <p className="mt-4 text-caption text-ink-faint">
               Early-stage prototype. Names, classes, institutes and figures shown are

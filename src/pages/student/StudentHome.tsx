@@ -1,15 +1,13 @@
 import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRightIcon, InfoIcon, LinkIcon, MegaphoneIcon, UsersIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowRightIcon, InfoIcon, LinkIcon, MegaphoneIcon } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell';
 import { studentNav } from '../../components/app/navConfig';
 import { GuardianBanner } from '../../components/student/GuardianBanner';
 import { ClassCard } from '../../components/cards/ClassCard';
-import { ActivityCard } from '../../components/cards/ActivityCard';
 import { Badge } from '../../components/ui/Badge';
 import { LinkButton } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
-import { activities } from '../../data/study';
 import { classById } from '../../data/classes';
 import { myClassIds, recommended, sponsored } from '../../data/feed';
 import { exams } from '../../data/exams';
@@ -21,11 +19,9 @@ import { announcements, marks, upcomingSessions } from '../../data/people';
  */
 export function StudentHome() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const first = user?.name.split(' ')[0] ?? 'there';
   const next = upcomingSessions[0];
   const openExam = exams.find((e) => e.status === 'open');
-  const nearby = activities.filter((a) => a.visibility !== 'private' && a.status !== 'full').slice(0, 2);
 
   return (
     <AppShell
@@ -35,14 +31,8 @@ export function StudentHome() {
       initials={user?.initials ?? 'KP'}
       nav={studentNav}
       title={`Hi ${first}`}
-      subtitle="Here's your week — classes, study sessions and results in one place."
-      actions={
-      <LinkButton to="/study" size="sm">
-          <UsersIcon className="h-4 w-4" />
-          Study together
-        </LinkButton>
-      }>
-      
+      subtitle="Here's your week — classes, attendance and announcements in one place.">
+
       <div className="space-y-10">
         <GuardianBanner />
 
@@ -115,19 +105,6 @@ export function StudentHome() {
                 </div> :
               null;
             })}
-          </div>
-        </FeedSection>
-
-        {/* Study near you */}
-        <FeedSection
-          title="Study near you"
-          note="Public sessions for your subjects. Areas are approximate."
-          link={{ to: '/study', label: 'Open Study map' }}>
-          
-          <div className="grid gap-4 lg:grid-cols-2">
-            {nearby.map((a) =>
-            <ActivityCard key={a.id} activity={a} onOpen={(id) => navigate(`/study?activity=${id}`)} />
-            )}
           </div>
         </FeedSection>
 

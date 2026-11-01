@@ -4,10 +4,8 @@ import {
   ArrowRightIcon,
   ClipboardCheckIcon,
   ClockIcon,
-  FileQuestionIcon,
   MapPinIcon,
-  MegaphoneIcon,
-  PencilLineIcon } from
+  MegaphoneIcon } from
 'lucide-react';
 import { TeacherShell } from '../../components/teacher/TeacherShell';
 import { Badge } from '../../components/ui/Badge';
@@ -18,8 +16,6 @@ import { teacherActivity } from '../../data/teaching';
 
 const quickActions = [
 { to: '/teacher/attendance', label: 'Attendance', icon: ClipboardCheckIcon },
-{ to: '/teacher/marks', label: 'Marks', icon: PencilLineIcon },
-{ to: '/teacher/exams/new', label: 'Exam', icon: FileQuestionIcon },
 { to: '/teacher/announcements', label: 'Announcement', icon: MegaphoneIcon }];
 
 

@@ -56,7 +56,6 @@ export function ClassDetail() {
     setToast(saved ? 'Class removed from saved' : 'Class saved');
   };
 
-  const restricted = guardianState === 'restricted';
   const isStudent = user?.role === 'student';
 
   if (!item) {
@@ -231,14 +230,6 @@ export function ClassDetail() {
               {item.institute} · {item.day} {item.startTime} · {item.city}
             </p>
           </div>
-          {restricted ?
-          <p className="rounded-xl bg-state-warnBg px-4 py-3 text-small text-state-warn">
-              Enrolling is paused until a parent or guardian connects to your account.{' '}
-              <Link to="/student/connect-guardian" className="font-medium underline underline-offset-4">
-                Connect now
-              </Link>
-            </p> :
-          null}
           <ol className="space-y-3 text-small text-ink-soft">
             {isStudent ?
             <Step n={1} title="You request the seat">
@@ -263,7 +254,6 @@ export function ClassDetail() {
             {isStudent ?
             <Button
               className="flex-1"
-              disabled={restricted}
               onClick={() => {
                 setJoinOpen(false);
                 setToast('Enrolment request sent');

@@ -5,6 +5,7 @@ import { SiteHeader } from '../components/site/SiteHeader';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { Badge, VerifiedBadge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/States';
+import { PreviewBanner } from '../components/ui/PreviewBanner';
 import { institutes } from '../data/directory';
 
 export function Institutes() {
@@ -17,6 +18,7 @@ export function Institutes() {
     <div className="min-h-screen bg-canvas">
       <SiteHeader />
       <main className="mx-auto max-w-[1200px] px-5 py-10 lg:px-8">
+        <PreviewBanner />
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="max-w-2xl">
             <h1 className="text-h1 text-ink">Institutes</h1>

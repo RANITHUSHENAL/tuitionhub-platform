@@ -6,9 +6,12 @@ import type { AuthUser, Identity, TeachingWorkspace } from '../types';
 
 /** Only the chosen role and workspace are remembered in the browser; never the session itself. */
 const PREFERENCE_KEY = 'th-active-profile';
-const WINDOW_MS = 72 * 60 * 60 * 1000;
 
-export type GuardianState = 'not-required' | 'linked' | 'pending' | 'restricted';
+/**
+ * There is no countdown or lock-out (C6): the institute registers students and a
+ * parent links using an invitation code, so a minor is either linked or pending.
+ */
+export type GuardianState = 'not-required' | 'linked' | 'pending';
 
 interface Session {
   identity: Identity;
@@ -71,17 +74,10 @@ function savePreference(preference: Preference | null) {
   }
 }
 
-export function guardianStateOf(user: AuthUser | null, now = Date.now()): GuardianState {
+export function guardianStateOf(user: AuthUser | null): GuardianState {
   if (!user || user.role !== 'student' || !user.isMinor) return 'not-required';
   if (user.guardianLink === 'linked') return 'linked';
-  if (user.guardianDeadline && now > user.guardianDeadline) return 'restricted';
   return 'pending';
-}
-
-function withWindow(p: AuthUser): AuthUser {
-  return p.role === 'student' && p.isMinor && p.guardianLink === 'pending' && !p.guardianDeadline ?
-  { ...p, guardianDeadline: Date.now() + WINDOW_MS - 21 * 60 * 60 * 1000 } :
-  p;
 }
 
 function sessionFrom(identity: Identity, preference: Preference | null): Session {
@@ -149,7 +145,7 @@ export function AuthProvider({ children }: {children: React.ReactNode;}) {
       phone: next.phone,
       profiles: [next]
     };
-    const profiles = base.profiles.map((p) => p.id === next.id ? withWindow(next) : withWindow(p));
+    const profiles = base.profiles.map((p) => p.id === next.id ? next : p);
     setSession({ identity: { ...base, profiles }, activeProfileId: next.id });
   }, []);
 
@@ -243,5 +239,3 @@ export function useAuth() {
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
 }
-
-export const GUARDIAN_WINDOW_MS = WINDOW_MS;

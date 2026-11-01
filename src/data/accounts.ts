@@ -86,7 +86,7 @@ export const demoIdentities: {identity: Identity;label: string;description: stri
 },
 {
   label: 'Dinithi · student, guardian pending',
-  description: 'O/L 2027 — new account, 72-hour window running',
+  description: 'O/L 2027 — no parent linked yet',
   identity: {
     id: 'id-dinithi',
     name: 'Dinithi Pathirana',

@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button';
 import { Label, Select, TextInput } from '../components/ui/Field';
 import { SegmentedControl } from '../components/ui/Tabs';
 import { EmptyState } from '../components/ui/States';
+import { PreviewBanner } from '../components/ui/PreviewBanner';
 import { Badge } from '../components/ui/Badge';
 import { cities, classes } from '../data/classes';
 import { useLookups } from '../hooks/useLookups';
@@ -208,6 +209,7 @@ export function Search() {
         </aside>
 
         <div className="min-w-0 flex-1">
+          <PreviewBanner />
           {filtersOpen ?
           <div className="mb-6 rounded-2xl border border-line bg-white p-5 lg:hidden">
               {filterPanel}

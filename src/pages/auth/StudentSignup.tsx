@@ -5,7 +5,7 @@ import { AuthLayout, useAuthParams } from '../../components/auth/AuthLayout';
 import { PhoneOtp } from '../../components/auth/PhoneOtp';
 import { Button } from '../../components/ui/Button';
 import { Label, Select, TextInput } from '../../components/ui/Field';
-import { useAuth, GUARDIAN_WINDOW_MS } from '../../contexts/AuthContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { useLookups } from '../../hooks/useLookups';
 import { initialsOf } from '../../utils/format';
 import type { AuthUser } from '../../types';
@@ -50,7 +50,6 @@ export function StudentSignup() {
       phoneVerified: true,
       isMinor,
       guardianLink: isMinor ? 'pending' : 'not-required',
-      guardianDeadline: isMinor ? Date.now() + GUARDIAN_WINDOW_MS : undefined,
       enrollmentVerified: false
     };
     signIn(user);
@@ -153,11 +152,9 @@ export function StudentSignup() {
               <div className="flex items-start gap-3">
                 <ClockIcon className="mt-0.5 h-5 w-5 shrink-0 text-state-warn" aria-hidden="true" />
                 <div>
-                  <p className="text-small font-medium text-ink">Pending guardian connection · 72 hours</p>
+                  <p className="text-small font-medium text-ink">No parent or guardian linked yet</p>
                   <p className="mt-1 text-small text-ink-soft">
-                    Connect a parent or guardian to keep your account active and unlock
-                    full TuitionHub features. You can browse, see your schedule and join
-                    public study sessions in the meantime.
+                    Your institute registers students; a parent links using an invitation code.
                   </p>
                 </div>
               </div>

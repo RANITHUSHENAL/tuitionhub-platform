@@ -9,8 +9,7 @@ import { roleHome, roleLabel } from '../../data/accounts';
 const nav = [
 { to: '/search', label: 'Classes' },
 { to: '/institutes', label: 'Institutes' },
-{ to: '/teachers', label: 'Teachers' },
-{ to: '/study', label: 'Study' }];
+{ to: '/teachers', label: 'Teachers' }];
 
 
 const languages = ['සිංහල', 'தமிழ்', 'EN'];

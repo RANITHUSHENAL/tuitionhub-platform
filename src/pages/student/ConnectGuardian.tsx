@@ -233,15 +233,6 @@ export function ConnectGuardian() {
             }
               </section> :
           null}
-
-            {guardianState === 'pending' ?
-          <button
-            onClick={() => update({ guardianDeadline: Date.now() - 1000 })}
-            className="text-caption text-ink-faint underline underline-offset-4">
-            
-                Prototype: preview the state after 72 hours
-              </button> :
-          null}
           </>
         }
       </div>
