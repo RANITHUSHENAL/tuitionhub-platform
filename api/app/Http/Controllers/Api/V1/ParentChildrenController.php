@@ -8,6 +8,7 @@ use App\Http\Resources\ParentChildResource;
 use App\Http\Responses\PaginatedResponse;
 use App\Models\GuardianProfile;
 use App\Models\StudentGuardian;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -22,7 +23,12 @@ class ParentChildrenController extends Controller
         $page = StudentGuardian::query()
             ->active()
             ->whereIn('guardian_id', GuardianProfile::query()->select('id')->where('user_id', $request->user()->getKey()))
-            ->with('student.grade')
+            ->with([
+                'student.grade',
+                // E2-1 superseded (D-027): the student's active enrolments, with class and institute.
+                'student.enrollments' => fn (HasMany $enrollments) => $enrollments->active()->orderBy('enrolled_on')->orderBy('id'),
+                'student.enrollments.tuitionClass.institute',
+            ])
             ->orderBy('linked_at')
             ->orderBy('id')
             ->paginate($request->perPage(), ['*'], 'page', $request->page());

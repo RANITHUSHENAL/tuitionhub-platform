@@ -7,6 +7,7 @@ use App\Audit\AuditLogger;
 use App\Exceptions\DomainRuleException;
 use App\Models\ClassEnrollment;
 use App\Models\ClassFeeVersion;
+use App\Models\ClassSession;
 use App\Models\Institute;
 use App\Models\TeacherAssignment;
 use App\Models\TeacherProfile;
@@ -137,6 +138,7 @@ class ClassService
 
             if ($class->isDirty(['starts_on', 'ends_on'])) {
                 $this->assertActiveEnrollmentsWithinDates($class);
+                $this->assertSessionsWithinDates($class);
             }
 
             if ($class->isDirty('max_students') && $class->max_students < $this->activeEnrollmentCount($class)) {
@@ -288,6 +290,26 @@ class ClassService
 
         if ($class->ends_on !== null && (clone $active)->where('enrolled_on', '>', $class->ends_on->format('Y-m-d'))->exists()) {
             throw ValidationException::withMessages(['ends_on' => 'An active enrolment starts after this date.']);
+        }
+    }
+
+    /**
+     * D-026 carry-forward (E3b): every non-cancelled session must stay within the class dates.
+     *
+     * @throws ValidationException
+     */
+    private function assertSessionsWithinDates(TuitionClass $class): void
+    {
+        $sessions = ClassSession::query()
+            ->where('class_id', $class->getKey())
+            ->where('status', '<>', ClassSession::STATUS_CANCELLED);
+
+        if ((clone $sessions)->where('session_date', '<', $class->starts_on->format('Y-m-d'))->exists()) {
+            throw ValidationException::withMessages(['starts_on' => 'A session is scheduled before this date.']);
+        }
+
+        if ($class->ends_on !== null && (clone $sessions)->where('session_date', '>', $class->ends_on->format('Y-m-d'))->exists()) {
+            throw ValidationException::withMessages(['ends_on' => 'A session is scheduled after this date.']);
         }
     }
 

@@ -168,6 +168,23 @@ class UpdateClassTest extends TestCase
             ->assertOk()->assertJsonPath('data.starts_on', '2026-03-01')->assertJsonPath('data.ends_on', '2026-12-31');
     }
 
+    public function test_dates_must_contain_every_non_cancelled_session(): void
+    {
+        $institute = $this->makeInstitute();
+        $class = $this->makeClass($institute, ['starts_on' => '2026-01-01']);
+        $this->makeSession($class, ['session_date' => '2026-03-10']);
+        $this->makeSession($class, ['session_date' => '2026-02-01', 'status' => 'cancelled']);
+        $this->loginAs($this->adminOf($institute));
+
+        $this->spa('PATCH', $this->classUrl($class), ['starts_on' => '2026-03-11'])
+            ->assertUnprocessable()->assertJsonPath('errors.starts_on.0', 'A session is scheduled before this date.');
+        $this->spa('PATCH', $this->classUrl($class), ['ends_on' => '2026-03-09'])
+            ->assertUnprocessable()->assertJsonPath('errors.ends_on.0', 'A session is scheduled after this date.');
+
+        // A cancelled session does not hold the dates (it is history only).
+        $this->spa('PATCH', $this->classUrl($class), ['starts_on' => '2026-03-01', 'ends_on' => '2026-03-10'])->assertOk();
+    }
+
     public function test_a_new_teacher_needs_an_active_assignment_and_unknown_fields_are_rejected(): void
     {
         $institute = $this->makeInstitute();

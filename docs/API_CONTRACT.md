@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.8 |
-| **Date** | 2026-11-01 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29; 0.6.1, 0.7, 0.7.1: 2026-11-01) |
+| **Version** | `v1` draft 0.9 |
+| **Date** | 2026-11-01 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29; 0.6.1, 0.7, 0.7.1, 0.8: 2026-11-01) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
-| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). Guardian links (§9) follow decisions E2-1–E2-9 (D-023). Classes, fees and enrolments (§6.4, §7, §8.3–§8.5) follow the R3 schema decisions (D-024) and E3a (D-026). |
+| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). Guardian links (§9) follow decisions E2-1–E2-9 (D-023). Classes, fees and enrolments (§6.4, §7, §8.3–§8.5) follow the R3 schema decisions (D-024) and E3a (D-026); sessions and attendance (§10) follow E3b (D-027). |
 | **Schema source** | `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema), adapted as listed in §2. |
 
 > **Demo-money boundary.** Nothing in this contract moves real money. All payments are `provider: "mock"`, all commission rows are demo accruals, and there are no settlement, payout, refund-processing or live-gateway endpoints. See §11.
@@ -71,7 +71,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 { "message": "This role is already granted.", "reason": "role_already_granted" }
 ```
 
-- **`409` state conflicts** always include `reason`. Codes defined so far: `role_already_granted`, `role_not_granted`, `owner_admin_revocation_forbidden`, `already_active`, `not_active`, `invitation_pending`, `invitation_not_pending`, `link_already_active` (§9, E2-8), `class_full`, `class_archived`, `invalid_status_transition`, `max_students_below_active`, `attendance_recorded` (§7, §8, D-026). Later endpoints add their own codes here.
+- **`409` state conflicts** always include `reason`. Codes defined so far: `role_already_granted`, `role_not_granted`, `owner_admin_revocation_forbidden`, `already_active`, `not_active`, `invitation_pending`, `invitation_not_pending`, `link_already_active` (§9, E2-8), `class_full`, `class_archived`, `invalid_status_transition`, `max_students_below_active`, `attendance_recorded` (§7, §8, D-026), `session_slot_taken`, `session_cancelled`, `session_has_attendance`, `session_in_future` (§10, D-027). Later endpoints add their own codes here.
 - **`403` with `reason`:** `not_eligible` (for example, onboarding prerequisites not met) and `institute_suspended` (a write to a suspended institute by anyone other than `super_admin`, §3). Other `403`s return `message` only.
 - **Invalid values** detected by a business rule (unknown district, position or role, role/scope mismatch, invalid date) use the `422` `errors` shape above, keyed by the offending field, with no `reason`.
 
@@ -96,7 +96,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 | `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …), with a `reason` code (§1.3) |
 | `419` | CSRF token missing or invalid on a stateful SPA request (§1.2). The SPA should fetch `/sanctum/csrf-cookie` again and retry once. |
 | `422` | Validation error |
-| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.4, §7.1, §7.2, §7.4, §8 and §9 share **60 requests per minute per user**; the public `GET /lookups`, `GET /classes/{uuid}` (§7.3) and `GET /public/classes` (§7.5) allow **60 per minute per IP** each. The OTP endpoints (§4.1, §4.2) have only their own limits. Accepting an invitation (§9.2) is also limited to **5 attempts per 15 minutes per user** (E2-7). |
+| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.4, §7.1, §7.2, §7.4, §8, §9 and §10 share **60 requests per minute per user**; the public `GET /lookups`, `GET /classes/{uuid}` (§7.3) and `GET /public/classes` (§7.5) allow **60 per minute per IP** each. The OTP endpoints (§4.1, §4.2) have only their own limits. Accepting an invitation (§9.2) is also limited to **5 attempts per 15 minutes per user** (E2-7). |
 | `503` | A required service is unavailable or not configured (e.g. OTP driver or OTP key, §4.1; invitation key, §9.1). Fails closed; never degrades to an insecure fallback. **Also** `{"message":"The service is busy. Please try again."}` with `Retry-After: 1` when a write lost a database concurrency race: a deadlock still failing after 3 attempts, or a row lock not obtained within 10 s (D-022). Nothing was saved, so the client may repeat the request. |
 
 ### 1.5 Data types
@@ -657,7 +657,7 @@ Class shape (`Class`, authorised views):
 - **Rules:** A fee change **creates a new fee version**; existing version amounts are never edited (only the previous version's `effective_to` is closed to the day before the new `effective_from`). `effective_from` must be after the current version's `effective_from` (`422` on `fee.effective_from`). Existing invoices keep their snapshots. `max_students` cannot be set below the active enrolment count (`409` `reason: max_students_below_active`). Audited (`class.updated`, `fee.version_created`).
 - **Authorization** (visibility first, D-026): the institute's admins, or `super_admin` (also while the institute is suspended). Callers who can see the class but may not change it (staff, the assigned teacher) → `403`. Anyone who cannot see it (§7.3), including other teachers at the institute → `404`. A suspended institute → `403` `reason: institute_suspended` for admins.
 - **Status** (D-024 Q46): `draft → active`, `draft → archived`, `active → archived`; anything else → `409` `reason: invalid_status_transition`. **An archived class is final:** any change to it → `409` `reason: class_archived`.
-- **Dates:** `ends_on >= starts_on` (`422`). Every **active** enrolment's `enrolled_on` must stay within the new `starts_on`–`ends_on` (`422` on the date that would exclude it). A new `teacher_uuid` needs an active assignment here (`422`).
+- **Dates:** `ends_on >= starts_on` (`422`). Every **active** enrolment's `enrolled_on`, and every **non-cancelled** session's `session_date` (D-027), must stay within the new `starts_on`–`ends_on` (`422` on the date that would exclude it). A new `teacher_uuid` needs an active assignment here (`422`).
 - **Unchanged:** fields equal to the stored values write nothing and record no audit row (§1.6). A `fee` always creates a version.
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
@@ -927,7 +927,7 @@ Student shape (`Student`, institute view):
 ```
 
 - **Rules:** scoped in the query to the caller's own active links, re-read on every request (a revoked link disappears on the next request). Ordered by `linked_at`, then internal link order. Students of a **suspended** institute are included (E2-3). A user with no guardian profile gets an empty page.
-- **`active_enrollments`** is always `[]` until the enrolment tables (§8.3) exist (E2-1); no class is shown before then.
+- **`active_enrollments`** (D-027, superseding E2-1's empty list): the child's enrolments with status `active` (including ones starting in the future), ordered by `enrolled_on`, then internal order. Each item has the enrolment `uuid`, `class` (`uuid`, `title`) and `institute` (`name` only). Withdrawn enrolments are not listed; their past attendance stays in §10.5.
 - **Errors:** `401`, `422` (pagination).
 
 ---
@@ -958,13 +958,22 @@ Session shape (`Session`):
 ```
 
 - **Success `201`:** `{ "data": Session }` (status `scheduled`).
-- **Rules:** Times are `Asia/Colombo`, in whole minutes; `end_time` > `start_time`. A duplicate (class, date, start_time) among the class's **non-cancelled** sessions → `409`. **A cancelled session frees its slot** (D-024): a new session may then use the same date and start time, and the cancelled one stays as history. Recurring schedule generation is not in sprint.
+- **Rules:** Times are `Asia/Colombo`, in whole minutes; `end_time` > `start_time`. A duplicate (class, date, start_time) among the class's **non-cancelled** sessions → `409` `reason: session_slot_taken`. **A cancelled session frees its slot** (D-024): a new session may then use the same date and start time, and the cancelled one stays as history. Recurring schedule generation is not in sprint.
+- **Authorization** (visibility first, D-026): the assigned teacher (with an active assignment) or an institute manager (admin, or staff with position `manager`). Callers who can see the class but may not schedule (other staff, `super_admin`) → `403`. Anyone who cannot see the class → `404`. A suspended institute → `403` `reason: institute_suspended`, also for the teacher.
+- **Rules** (D-024 Q47, D-027):
+  - The class must be `active` (`409` `reason: not_active`).
+  - `session_date` must lie within the class's `starts_on`–`ends_on` (`422`).
+  - `start_time`/`end_time` are `HH:MM`, 24-hour; `end_time` after `start_time` (`422`). Sessions may overlap if their start times differ.
+  - No other field is accepted; `status` is always `scheduled` on creation.
+  - Audited (`session.created`, §13).
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
 ### 10.2 `GET /api/v1/classes/{classUuid}/sessions?from=&to=&status=&page=&per_page=`
 
 - **Permission:** assigned teacher, same-institute staff/admin, or `super_admin`. Guardians/students do not use this endpoint; their views are scoped through §10.5.
-- **Success `200`:** paginated `Session[]`, ordered by `session_date`, `start_time`.
+- **Success `200`:** paginated `Session[]`, ordered by `session_date`, `start_time`, then internal order. Cancelled sessions are listed too (history).
+- **Filters:** `from`, `to` (`YYYY-MM-DD`, inclusive; `to >= from`), `status` (`scheduled|cancelled`).
+- **Private:** only `super_admin`, the assigned teacher (active assignment) and the institute's admins and active staff. A publicly listed class never exposes its schedule. Any other signed-in caller, including other teachers at the institute → `404`; unauthenticated → `401` (§1.4).
 - **Errors:** `401`, `404`, `422`.
 
 ### 10.3 `POST /api/v1/sessions/{sessionUuid}/attendance`
@@ -997,7 +1006,17 @@ Session shape (`Session`):
   - Each enrolment must belong to the session's class and be active on `session_date` (`422` otherwise).
   - One row per (session, enrolment), enforced by a unique index; the request upserts in one transaction.
   - A change to an existing row is a **correction** and writes an audit event with old and new values.
-  - Cancelled sessions → `409`. Proposed: sessions dated after today (`Asia/Colombo`) → `409`.
+  - Cancelled sessions → `409` `reason: session_cancelled`. Sessions dated after today (`Asia/Colombo`) → `409` `reason: session_in_future` (D-024 Q55). Sessions of an archived class → `409` `reason: class_archived`.
+- **Authorization** (visibility first): the assigned teacher (active assignment), or the institute's admins and active staff. `super_admin` → `403`; anyone who cannot see the class → `404`; a suspended institute → `403` `reason: institute_suspended`. Runs under the institute, class and session row locks.
+- **Eligibility** (D-024 Q48): "active on `session_date`" means `enrolled_on <= session_date < withdrawn_on`.
+  - An enrolment withdrawn **after** the session date can still be marked or corrected for it.
+  - Errors are reported per record, as `422` on `records.N.enrollment_uuid` ("not in this class" or "not active on the session date"); nothing is saved.
+- **Upsert** (D-027):
+  - A new mark is inserted and audited `attendance.recorded`.
+  - A changed mark (`status`, `method` or `notes`) is updated in place with a new `marked_by`/`marked_at` and audited `attendance.corrected`, recording only whether the notes changed, never their text (Q49).
+  - **Notes:** omitting `notes` keeps the stored note; an explicit `null` clears it; a string replaces it. A first mark without `notes` stores none.
+  - An unchanged mark writes nothing and keeps its original marker and time (§1.6); `marked_by`/`marked_at` never change on their own.
+- **Fields:** each record has exactly `enrollment_uuid`, `status`, `method` (required) and `notes` (optional, up to 500 characters, multi-line free text). Any other field → `422`.
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
 ### 10.4 `GET /api/v1/sessions/{sessionUuid}/attendance`
@@ -1016,7 +1035,9 @@ Session shape (`Session`):
 
 `attendance` is `null` for active enrolments not yet marked.
 
-- **Errors:** `401`, `404`.
+- **Rows** (D-027): every enrolment active on `session_date`, plus any enrolment already marked for this session (for example one withdrawn later), so recorded history never disappears. Ordered by student `full_name`, then internal order. Not paginated (at most the class's enrolments).
+- **Permission detail:** also readable while the institute is suspended. `super_admin` (not listed) → `403`; anyone who cannot see the class → `404`.
+- **Errors:** `401`, `403`, `404`.
 
 ### 10.5 `GET /api/v1/parents/me/children/{studentUuid}/attendance?from=&to=&class_uuid=&page=&per_page=`
 
@@ -1033,26 +1054,31 @@ Session shape (`Session`):
       "marked_at": "…"
     }
   ],
-  "meta": {}
+  "meta": { "current_page": 1, "per_page": 25, "total": 1, "last_page": 1 }
 }
 ```
 
 - **Rules:** Only the linked child's own attendance; no other students' data. Defaults: last 30 days; max range 366 days (`422` beyond).
+  - **Window** (D-027): `to` defaults to today (`Asia/Colombo`); `from` defaults to the 30 days ending on `to` (`to` − 29 days). Inclusive at most 366 days (`422` on `to`); `from > to` → `422` on `from`.
+  - `class_uuid` (a well-formed UUID; an unknown one matches nothing) filters by class.
+  - Ordered newest first: `session_date`, `start_time`, then internal order, all descending.
+  - **Past attendance stays visible after a withdrawal** (D-024 Q51): access comes from the guardian link, not the enrolment. Notes and the marker are never shown to guardians.
+  - The link is re-checked on every request; a revoked link → `404` at once.
 - **Errors:** `401`, `404`, `422`.
 
-### 10.6 `POST /api/v1/sessions/{sessionUuid}/cancel` — **PROPOSED (E3); not implemented**
+### 10.6 `POST /api/v1/sessions/{sessionUuid}/cancel`
 
-The schema supports it (D-024). The permission and audit details are finalised in the E3 plan.
-
-- **Permission (proposed):** as in §10.1 (assigned teacher, or manager of the class's institute). A suspended institute → `403` `reason: institute_suspended`.
-- **Request:** none.
-- **Success `200` (proposed):** `{ "data": Session }` with `status: "cancelled"`.
-- **Rules (approved, D-024):**
-  - Only a `scheduled` session can be cancelled (`409` otherwise). The row is never deleted.
+- **Permission:** as in §10.1 (visibility first): the assigned teacher (active assignment), or a manager of the class's institute. Other staff and `super_admin` → `403`; anyone who cannot see the class → `404`; a suspended institute → `403` `reason: institute_suspended`.
+- **Request:** none; any body field → `422`, checked after authorization.
+- **Success `200`:** `{ "data": Session }` with `status: "cancelled"`.
+- **Rules (D-024, D-027):**
+  - Only a `scheduled` session can be cancelled; an already cancelled one → `409` `reason: session_cancelled`. The row is never deleted.
   - Cancelling frees the slot (§10.1).
-  - A session that already has attendance cannot be cancelled (`409`).
+  - A session that already has attendance cannot be cancelled (`409` `reason: session_has_attendance`).
+  - A session of an archived class → `409` `reason: class_archived`.
   - Attendance cannot be recorded for a cancelled session (§10.3).
-  - Audited (event name proposed: `session.cancelled`).
+  - Runs under the institute, class and session row locks. Audited (`session.cancelled`, §13).
+- **Errors:** `401`, `403`, `404`, `409`, `422`.
 
 ---
 
@@ -1320,7 +1346,7 @@ Written to `audit_logs` (immutable, no soft deletes) with actor, target, old/new
   - `guardian_link.revoked`, when a revocation promotes another link (§9.4).
   - Both carry the old primary link ID and the new primary link ID (either may be `null`).
 
-`user.profile_updated` (FD-2), `institute.created`, `institute.updated`, `institute.status_changed`, `teacher.assigned`, `teacher_assignment.ended`, `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `student.created`, `class.created`, `class.updated`, `fee.version_created`, `enrollment.created`, `enrollment.withdrawn`, `guardian_invitation.created`, `guardian_invitation.accepted`, `guardian_invitation.revoked`, `guardian_link.created`, `guardian_link.revoked`, `attendance.recorded`, `attendance.corrected`, `invoice.created`, `payment.attempt_created`, `payment.succeeded`, `payment.failed`, `payment.cancelled`, `commission.accrued`, `boost_purchase.recorded_demo`.
+`user.profile_updated` (FD-2), `institute.created`, `institute.updated`, `institute.status_changed`, `teacher.assigned`, `teacher_assignment.ended`, `role.granted`, `role.revoked`, `staff.added`, `staff.ended`, `student.created`, `class.created`, `class.updated`, `fee.version_created`, `enrollment.created`, `enrollment.withdrawn`, `session.created`, `session.cancelled`, `guardian_invitation.created`, `guardian_invitation.accepted`, `guardian_invitation.revoked`, `guardian_link.created`, `guardian_link.revoked`, `attendance.recorded`, `attendance.corrected`, `invoice.created`, `payment.attempt_created`, `payment.succeeded`, `payment.failed`, `payment.cancelled`, `commission.accrued`, `boost_purchase.recorded_demo`.
 
 `role.granted`, `role.revoked`, `staff.added`, `staff.ended` and `teacher_assignment.ended` are written by server-side services. There is no staff-management or assignment-end endpoint in the sprint. The owner's automatic `institute_admin` grant writes `role.granted` in the same transaction as `institute.created`.
 
@@ -1339,6 +1365,10 @@ Written to `audit_logs` (immutable, no soft deletes) with actor, target, old/new
 | `fee.version_created` | `class_fee_version` | — | `class_uuid`, `amount`, `currency`, `billing_cycle`, `effective_from`, `previous_effective_to` (the date the previous version was closed, or `null` for the first) |
 | `enrollment.created` | `class_enrollment` | — | `enrollment_uuid`, `class_uuid`, `student_uuid`, `status`, `enrolled_on` — never the student's name |
 | `enrollment.withdrawn` | `class_enrollment` | `status` | `enrollment_uuid`, `class_uuid`, `student_uuid`, `status`, `enrolled_on`, `withdrawn_on` (as stored) |
+| `session.created` | `class_session` | — | `session_uuid`, `class_uuid`, `session_date`, `start_time`, `end_time` (`HH:MM`), `status` |
+| `session.cancelled` | `class_session` | `status` | the same fields as `session.created`, with `status: cancelled` |
+| `attendance.recorded` | `attendance` | — | `session_uuid`, `enrollment_uuid`, `status`, `method` — one row per new mark; never the notes |
+| `attendance.corrected` | `attendance` | `status`, `method` | `session_uuid`, `enrollment_uuid`, `status`, `method`, `notes_changed` — never the note text (D-024 Q49) |
 | `guardian_invitation.created` | `guardian_invitation` | — | `invitation_uuid`, `student_uuid`, `institute_uuid`, `relationship`, `guardian_phone_masked`, `status`, `expires_at` — never the code, its hash or the full phone |
 | `guardian_invitation.accepted` | `guardian_invitation` | `status` | `invitation_uuid`, `student_uuid`, `status` |
 | `guardian_invitation.revoked` | `guardian_invitation` | `status` | `invitation_uuid`, `student_uuid`, `status` |
@@ -1393,12 +1423,12 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 9.3 | POST | `/api/v1/guardian-invitations/{invitationUuid}/revoke` | inviter (same institute), same-institute admin, super_admin |
 | 9.4 | DELETE | `/api/v1/students/{studentUuid}/guardian-links/{guardianUuid}` | managing-institute admin, super_admin |
 | 9.5 | GET | `/api/v1/parents/me/children` | authenticated (active links; incl. suspended institutes) |
-| 10.1 | POST | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, institute manager |
-| 10.2 | GET | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, same-institute staff/admin |
-| 10.3 | POST | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin |
-| 10.4 | GET | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin |
+| 10.1 | POST | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, institute manager; active class; not while suspended |
+| 10.2 | GET | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, same-institute staff/admin, super_admin |
+| 10.3 | POST | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin; not while suspended |
+| 10.4 | GET | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin (incl. suspended institutes) |
 | 10.5 | GET | `/api/v1/parents/me/children/{studentUuid}/attendance` | active guardian link |
-| 10.6 | POST | `/api/v1/sessions/{sessionUuid}/cancel` | **proposed (E3)**: assigned teacher, institute manager |
+| 10.6 | POST | `/api/v1/sessions/{sessionUuid}/cancel` | assigned teacher, institute manager; not while suspended |
 | 11.2 | POST | `/api/v1/enrollments/{enrollmentUuid}/invoices` | institute billing user |
 | 11.3 | GET | `/api/v1/institutes/{instituteUuid}/invoices` | institute billing user, super_admin (read-only) |
 | 11.4 | GET | `/api/v1/parents/me/invoices` | authenticated (active links) |
@@ -1426,3 +1456,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 0.7 draft | 2026-11-01 | **E2: guardian invitations, linking, revocation and children (D-023; decisions E2-1 – E2-9).** §1.3: `409` reasons `invitation_pending`, `invitation_not_pending`, `link_already_active` (E2-8). §1.4: the 60/min per-user limit covers §9; accept also 5 attempts per 15 min per user (E2-7). §9.1: phone formats (E2-6), self-invite `422` (E2-4), field rules, `super_admin` `403`, teacher-only `404`, `institute_suspended`, expired pending invitations retired and replaced, expiry 48 h. §9.2: request rules, inviter's own invitation → generic `422` (E2-4), order of checks with `institute_suspended` after the code checks (E2-2), generic `422` body, `link_already_active`, lazy expiry saved. §9.3: same-institute admins may revoke (E2-5), other staff `403`, a departed inviter `404`, `invitation_not_pending`, invitations from departed staff stay valid (E2-9). §9.4: authorization order, uniform `404`, no body. §9.5: order, pagination `meta`, suspended institutes included (E2-3), `active_enrollments: []` until enrolments exist (E2-1). §13: payloads for the five guardian events. §15 labels. |
 | 0.7.1 draft | 2026-11-01 | **R3 schema approved (D-024).** §8.3: `enrolled_on` may be in the future, within the class's `starts_on`–`ends_on`; enrolments are never deleted or reactivated. **New §8.5 (proposed, E3):** withdraw an enrolment, with a withdrawal before `enrolled_on` stored as `withdrawn_on = enrolled_on` (zero-length), and a withdrawal that would invalidate existing attendance → `409`. §10.1: whole-minute times; uniqueness is among **non-cancelled** sessions, so a cancelled session frees its slot. **New §10.6 (proposed, E3):** cancel a session (`scheduled` only; not if it has attendance). §15: rows 8.5 and 10.6 (proposed). No implemented endpoint changed. |
 | 0.8 draft | 2026-11-01 | **E3a: classes, fee versions, enrolments, teacher classes and the public catalogue (D-026).** §1.3: `409` reasons `class_full`, `class_archived`, `invalid_status_transition`, `max_students_below_active`, `attendance_recorded`. §1.4: the per-user limit covers §6.4, §7.1, §7.2, §7.4 and §8; §7.3 and §7.5 are public at 60/min per IP. §6.4 implemented (active assignments only; `403` without a teacher profile). §7.1: field rules (money string, `max_students` 1–10,000, dates), authorization (`super_admin` `403`). §7.2: filters, order, teacher-only `403`, errors `403`/`422`. §7.3: public only at an active institute; an optional session decides `Class` vs `PublicClass`. §7.4: status transitions, archived final (`class_archived`), date and teacher rules, `fee.effective_from` `422`, unchanged writes nothing. §7.5: filters, hidden teacher omitted. §8.3: `enrolled_on` defaults to today; `not_active`, `already_active`, `class_full`; `super_admin` `403`. §8.4: filter, order, `super_admin` allowed. **§8.5 finalised:** `withdrawn_on` required and not in the future; zero-length clamp; `attendance_recorded`; `enrollment.withdrawn`. §13: `enrollment.withdrawn` added; payloads for the five class and enrolment events. §15 labels. **Visibility first** for §7.4, §8.3 and §8.5: callers who cannot see the class get `404` (including unassigned teachers at the institute), those who can see it but may not act get `403`; authorization always precedes validation. |
+| 0.9 draft | 2026-11-01 | **E3b: sessions, cancellation, attendance and the guardian attendance view (D-027).** §1.3: `409` reasons `session_slot_taken`, `session_cancelled`, `session_has_attendance`, `session_in_future`. §1.4: the per-user limit covers §10. §9.5: `active_enrollments` filled with the child's active enrolments (supersedes E2-1). §10.1: visibility-first authorization, active class, dates within the class, `HH:MM` times, audit. §10.2: filters, order, cancelled sessions listed. §10.3: future sessions `409` (decided), archived class `409`, eligibility `enrolled_on <= d < withdrawn_on`, per-record `422`, upsert and correction rules, `notes` up to 500 characters. §10.4: rows include enrolments marked for the session, order, `super_admin` `403`. §10.5: window defaults and limits, order, past attendance kept after withdrawal, no notes. **§10.6 finalised:** `session_cancelled`, `session_has_attendance`, `class_archived`, audit. §13: `session.created` and `session.cancelled` added; payloads for the session and attendance events. §15 labels. Class date changes must keep every non-cancelled session inside the new dates (`422`). |

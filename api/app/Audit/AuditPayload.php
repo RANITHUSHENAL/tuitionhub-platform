@@ -60,7 +60,15 @@ final class AuditPayload
         AuditAction::FEE_VERSION_CREATED => ['class_uuid', 'amount', 'currency', 'billing_cycle', 'effective_from', 'previous_effective_to'],
         AuditAction::ENROLLMENT_CREATED => ['enrollment_uuid', 'class_uuid', 'student_uuid', 'status', 'enrolled_on'],
         AuditAction::ENROLLMENT_WITHDRAWN => ['enrollment_uuid', 'class_uuid', 'student_uuid', 'status', 'enrolled_on', 'withdrawn_on'],
+        // Sessions and attendance (D-027). Attendance notes are free text and never recorded:
+        // a correction records only whether they changed (D-024 Q49).
+        AuditAction::SESSION_CREATED => self::SESSION_FIELDS,
+        AuditAction::SESSION_CANCELLED => self::SESSION_FIELDS,
+        AuditAction::ATTENDANCE_RECORDED => ['session_uuid', 'enrollment_uuid', 'status', 'method'],
+        AuditAction::ATTENDANCE_CORRECTED => ['session_uuid', 'enrollment_uuid', 'status', 'method', 'notes_changed'],
     ];
+
+    private const SESSION_FIELDS = ['session_uuid', 'class_uuid', 'session_date', 'start_time', 'end_time', 'status'];
 
     private const CLASS_FIELDS = [
         'class_uuid', 'institute_uuid', 'teacher_uuid', 'title', 'status', 'mode', 'max_students', 'starts_on', 'ends_on',

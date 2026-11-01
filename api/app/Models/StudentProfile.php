@@ -84,6 +84,14 @@ class StudentProfile extends Model
     }
 
     /**
+     * @return HasMany<ClassEnrollment, $this>
+     */
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(ClassEnrollment::class, 'student_id');
+    }
+
+    /**
      * @return HasMany<StudentGuardian, $this>
      */
     public function guardianLinks(): HasMany

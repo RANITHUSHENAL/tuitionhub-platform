@@ -2,16 +2,16 @@
 
 namespace App\Http\Resources;
 
+use App\Models\ClassEnrollment;
 use App\Models\StudentGuardian;
 use App\Support\Instant;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * One child in GET /parents/me/children (contract v0.7 §9.5), built from an active link with
- * `student.grade` loaded. No internal IDs.
- *
- * active_enrollments is always [] until the enrolment tables exist (E2-1); no class is invented.
+ * One child in GET /parents/me/children (contract v0.9 §9.5), built from an active link with
+ * `student.grade` and the student's active enrolments (with class and institute) loaded. No
+ * internal IDs.
  *
  * @mixin StudentGuardian
  */
@@ -32,7 +32,11 @@ class ParentChildResource extends JsonResource
             ],
             'relationship' => $this->relationship,
             'linked_at' => Instant::format($this->linked_at),
-            'active_enrollments' => [],
+            'active_enrollments' => $student->enrollments->map(fn (ClassEnrollment $enrollment) => [
+                'uuid' => $enrollment->uuid,
+                'class' => ['uuid' => $enrollment->tuitionClass->uuid, 'title' => $enrollment->tuitionClass->title],
+                'institute' => ['name' => $enrollment->tuitionClass->institute->name],
+            ])->values()->all(),
         ];
     }
 }

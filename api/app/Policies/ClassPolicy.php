@@ -97,6 +97,80 @@ class ClassPolicy
         return Response::allow();
     }
 
+    /**
+     * POST /classes/{uuid}/sessions (§10.1) and session cancellation (§10.6): the assigned teacher
+     * or an institute manager (admin, or staff with position manager). Other staff and
+     * super_admin: 403. Anyone who cannot see the class: 404.
+     *
+     * @throws DomainRuleException INSTITUTE_SUSPENDED
+     */
+    public function manageSessions(User $user, TuitionClass $class, ?Institute $institute = null): Response
+    {
+        $institute = $this->instituteFor($class->institute_id, $institute);
+
+        if (! $this->canSeePrivateData($user, $class, $institute)) {
+            return Response::denyAsNotFound();
+        }
+
+        if (! $this->access->isAssignedTeacher($user, $class) && ! $this->access->isManager($user, $institute)) {
+            return Response::deny();
+        }
+
+        $this->assertActive($institute);
+
+        return Response::allow();
+    }
+
+    /**
+     * GET /classes/{uuid}/sessions (§10.2): only super_admin, the assigned teacher (active
+     * assignment) and the institute's admins and active staff. Never the public catalogue rule: a
+     * publicly listed class does not expose its schedule. Everyone else: 404.
+     */
+    public function viewSessions(User $user, TuitionClass $class): Response
+    {
+        return $this->canSeePrivateData($user, $class) ? Response::allow() : Response::denyAsNotFound();
+    }
+
+    /**
+     * POST /sessions/{uuid}/attendance (§10.3): the assigned teacher, or the institute's admins and
+     * active staff. super_admin: 403. Anyone who cannot see the class: 404.
+     *
+     * @throws DomainRuleException INSTITUTE_SUSPENDED
+     */
+    public function markAttendance(User $user, TuitionClass $class, ?Institute $institute = null): Response
+    {
+        $institute = $this->instituteFor($class->institute_id, $institute);
+
+        if (! $this->canSeePrivateData($user, $class, $institute)) {
+            return Response::denyAsNotFound();
+        }
+
+        if (! $this->access->isAssignedTeacher($user, $class) && ! $this->isMember($user, $institute)) {
+            return Response::deny();
+        }
+
+        $this->assertActive($institute);
+
+        return Response::allow();
+    }
+
+    /**
+     * GET /sessions/{uuid}/attendance (§10.4): the assigned teacher, or the institute's admins and
+     * active staff, also while the institute is suspended. super_admin (§10.4 does not list it): 403.
+     */
+    public function viewAttendance(User $user, TuitionClass $class): Response
+    {
+        $institute = $this->instituteFor($class->institute_id, null);
+
+        if (! $this->canSeePrivateData($user, $class, $institute)) {
+            return Response::denyAsNotFound();
+        }
+
+        return $this->access->isAssignedTeacher($user, $class) || $this->isMember($user, $institute)
+            ? Response::allow()
+            : Response::deny();
+    }
+
     private function canSeePrivateData(User $user, TuitionClass $class, ?Institute $institute = null): bool
     {
         if ($this->access->isSuperAdmin($user) || $this->access->isAssignedTeacher($user, $class)) {

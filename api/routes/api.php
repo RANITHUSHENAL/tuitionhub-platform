@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\ChildAttendanceController;
 use App\Http\Controllers\Api\V1\ClassController;
 use App\Http\Controllers\Api\V1\ClassEnrollmentController;
+use App\Http\Controllers\Api\V1\ClassSessionController;
 use App\Http\Controllers\Api\V1\GuardianInvitationController;
 use App\Http\Controllers\Api\V1\GuardianLinkController;
 use App\Http\Controllers\Api\V1\InstituteController;
@@ -14,6 +16,7 @@ use App\Http\Controllers\Api\V1\MyInstitutesController;
 use App\Http\Controllers\Api\V1\MyTeacherClassesController;
 use App\Http\Controllers\Api\V1\ParentChildrenController;
 use App\Http\Controllers\Api\V1\PublicClassController;
+use App\Http\Controllers\Api\V1\SessionAttendanceController;
 use App\Http\Controllers\Api\V1\StudentController;
 use App\Http\Controllers\Api\V1\TeacherProfileController;
 use App\Http\Middleware\BindAuditContext;
@@ -22,7 +25,7 @@ use App\Http\Middleware\RequireStatefulFrontend;
 use Illuminate\Support\Facades\Route;
 
 /*
-| /api/v1 — contract v0.8. Session (cookie) auth only: bearer tokens are disabled (D-019).
+| /api/v1 — contract v0.9. Session (cookie) auth only: bearer tokens are disabled (D-019).
 */
 
 Route::prefix('v1')->group(function () {
@@ -87,5 +90,13 @@ Route::prefix('v1')->group(function () {
             Route::post('classes/{class}/enrollments', [ClassEnrollmentController::class, 'store']);
             Route::get('classes/{class}/enrollments', [ClassEnrollmentController::class, 'index']);
             Route::post('enrollments/{enrollment}/withdraw', [ClassEnrollmentController::class, 'withdraw']);
+
+            // E3b (§10.1–§10.6).
+            Route::post('classes/{class}/sessions', [ClassSessionController::class, 'store']);
+            Route::get('classes/{class}/sessions', [ClassSessionController::class, 'index']);
+            Route::post('sessions/{session}/cancel', [ClassSessionController::class, 'cancel']);
+            Route::post('sessions/{session}/attendance', [SessionAttendanceController::class, 'store']);
+            Route::get('sessions/{session}/attendance', [SessionAttendanceController::class, 'show']);
+            Route::get('parents/me/children/{student}/attendance', ChildAttendanceController::class);
         });
 });

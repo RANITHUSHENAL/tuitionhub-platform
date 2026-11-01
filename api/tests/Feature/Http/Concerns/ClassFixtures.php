@@ -2,7 +2,10 @@
 
 namespace Tests\Feature\Http\Concerns;
 
+use App\Models\Attendance;
 use App\Models\ClassEnrollment;
+use App\Models\ClassSession;
+use App\Models\GuardianProfile;
 use App\Models\Institute;
 use App\Models\StudentProfile;
 use App\Models\TeacherProfile;
@@ -69,6 +72,30 @@ trait ClassFixtures
         return ClassEnrollment::query()->findOrFail(
             $this->insertEnrollment($class->getKey(), $student->getKey(), $class->institute_id, $overrides),
         );
+    }
+
+    /**
+     * A scheduled session on 2026-11-03, 15:30–17:30, unless overridden.
+     */
+    protected function makeSession(TuitionClass $class, array $overrides = []): ClassSession
+    {
+        return ClassSession::query()->findOrFail($this->insertSession($class->getKey(), $overrides));
+    }
+
+    protected function mark(ClassSession $session, ClassEnrollment $enrollment, array $overrides = []): Attendance
+    {
+        return Attendance::query()->findOrFail($this->insertAttendance($session->getKey(), $enrollment->getKey(), $session->class_id, $overrides));
+    }
+
+    /**
+     * An active guardian link between the parent and the student (fixture insert, no invitation).
+     */
+    protected function linkGuardian(StudentProfile $student, User $parent): void
+    {
+        $profileId = GuardianProfile::query()->where('user_id', $parent->getKey())->value('id')
+            ?? $this->insertGuardianProfile(['user_id' => $parent->getKey()]);
+
+        $this->insertGuardianLink($student->getKey(), (int) $profileId);
     }
 
     protected function classUrl(TuitionClass $class): string

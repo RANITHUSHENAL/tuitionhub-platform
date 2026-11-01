@@ -47,6 +47,24 @@ class ClassEnrollment extends Model
     }
 
     /**
+     * Active on calendar date $date (D-024 Q48): enrolled_on <= $date < withdrawn_on, whatever the
+     * status. A zero-length enrolment (withdrawn_on = enrolled_on) is active on no date.
+     *
+     * @param  Builder<self>  $query
+     */
+    public function scopeActiveOn(Builder $query, string $date): void
+    {
+        $query->where('enrolled_on', '<=', $date)
+            ->where(fn (Builder $withdrawal) => $withdrawal->whereNull('withdrawn_on')->orWhere('withdrawn_on', '>', $date));
+    }
+
+    public function isActiveOn(string $date): bool
+    {
+        return $this->enrolled_on->format('Y-m-d') <= $date
+            && ($this->withdrawn_on === null || $date < $this->withdrawn_on->format('Y-m-d'));
+    }
+
+    /**
      * @return BelongsTo<TuitionClass, $this>
      */
     public function tuitionClass(): BelongsTo

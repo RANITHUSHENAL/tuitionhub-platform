@@ -773,6 +773,63 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   `AuditLoggerTest` was adjusted as in item 8.
 - **Open:** E3b (sessions §10.1–§10.2, cancel §10.6, attendance §10.3–§10.5); real two-process concurrency (E2c); applying M3 to `tuitionhub` (separate approval).
 
+## D-027 — E3b sessions, cancellation, attendance and the guardian attendance view — **Verified by automated tests 2026-11-01**
+
+- **Scope:** contract → **v0.9**. **No migrations, no packages**; nothing ran against `tuitionhub`. With this, the core journey runs end to end on the API: institute → class → teacher → student enrolled → session → attendance recorded → parent sees attendance.
+
+  | § | Endpoint |
+  |---|---|
+  | §10.1 | `POST /classes/{uuid}/sessions` |
+  | §10.2 | `GET /classes/{uuid}/sessions` |
+  | §10.6 | `POST /sessions/{uuid}/cancel` |
+  | §10.3 | `POST /sessions/{uuid}/attendance` |
+  | §10.4 | `GET /sessions/{uuid}/attendance` |
+  | §10.5 | `GET /parents/me/children/{uuid}/attendance` |
+
+  §9.5 `active_enrollments` is now filled.
+- **Authorization (visibility first, D-026):**
+  - New `ClassPolicy::manageSessions`: the assigned teacher or an institute manager. Also new: `viewSessions`, `markAttendance` (assigned teacher, admins, active staff) and `viewAttendance`.
+  - `ClassSessionPolicy` (`cancel`, `markAttendance`, `viewAttendance`) applies them to the session's class.
+  - Callers who cannot see the class → `404`; visible but not allowed → `403`; suspended institute → `institute_suspended` for writes.
+  - The guardian view requires `TenantAccess::hasActiveGuardianLink`, re-read on every request, else `404`.
+- **Lock order (D-022/D-024):**
+  - Session create: `institutes` → `classes`.
+  - Cancel and mark: `institutes` → `classes` → `class_sessions` (by id).
+  - Enrolments and existing attendance are plain reads after the class lock. Attendance rows are corrected by primary key.
+  - All writes run in `Transactions::retrying()`. The session-slot unique key maps to `409 session_slot_taken` without the database error. Tested through the executed SQL, with re-authorization after an assignment ends.
+- **Rules settled here** (from the contract and D-024; reported for founder review):
+  1. **Sessions:** the class must be `active` (`409 not_active`), and `session_date` must be within the class dates (`422`). Times are `HH:MM`. `super_admin` and non-manager staff → `403`.
+  2. **Cancel:** `scheduled` only (`409 session_cancelled`); not with attendance (`409 session_has_attendance`, Q50); not for an archived class (`409 class_archived`).
+  3. **Attendance:**
+     - Future sessions → `409 session_in_future` (Q55 decided); cancelled sessions → `409 session_cancelled`; archived class → `409 class_archived`.
+     - Eligibility is `enrolled_on <= d < withdrawn_on` (Q48), with per-record `422`s.
+     - Upsert: new → `attendance.recorded` (one audit row per mark); changed → `attendance.corrected` with old and new `status`/`method` and `notes_changed` only (Q49); unchanged → nothing.
+     - `method` is required (`manual`); `notes` up to 500 characters.
+  4. **Attendance sheet (§10.4):** rows are the enrolments active on the date, plus enrolments already marked for the session. Not paginated. Readable while the institute is suspended. `super_admin` → `403` (not listed in the contract).
+  5. **Guardian view (§10.5):**
+     - The window defaults to the 30 days ending today; at most 366 days inclusive.
+     - Ordered newest first.
+     - Past attendance stays visible after a withdrawal (Q51).
+     - No notes or marker are shown to guardians.
+  6. **§9.5 `active_enrollments`:** enrolments with status `active` (future ones included), each with class and institute name.
+  7. **Carry-forward from D-026:** a class's date change must keep every non-cancelled session inside the new dates (`422`). Cancelled sessions do not hold the dates.
+  8. **New 409 reasons:** `session_slot_taken`, `session_cancelled`, `session_has_attendance`, `session_in_future`. **New events:** `session.created`, `session.cancelled`; `attendance.recorded` and `attendance.corrected` now have payloads.
+- **Review fixes (before commit):**
+  - **Notes preservation:**
+    - An omitted `notes` key keeps the stored note on a correction; an explicit `null` clears it; a string replaces it; a first mark without notes stores none.
+    - `AttendanceService::mark` builds the mark from the submitted keys only, so a correction compares only status, method and submitted notes. If none changed, the row is not updated: `marked_by`/`marked_at` never change on their own.
+  - **Session list privacy:**
+    - `ClassPolicy::viewSessions` allows only super_admin, the assigned teacher (active assignment) and the institute's admins and active staff. It never uses the public catalogue rule: a publicly listed class does not expose its schedule.
+    - Any other signed-in caller gets `404`. An unauthenticated caller gets `401`, because the route is authenticated and contract §1.4 rule 1 puts `401` before any resource lookup. The brief asked for `404` there too; it was kept at `401` to stay within the contract and reported.
+- **Request limit:** an attendance submission holds 1–500 records (`422` beyond), each enrolment at most once.
+- **The core C1 backend journey is complete on the API:** institute → class → teacher → student enrolled → session → attendance recorded → parent sees attendance.
+- **Tests:** 37 new; `php artisan test` → **600 passed (7758 assertions)** on two consecutive runs (563 existing + 37):
+  - session create 9, list and cancel 6 (including the public-class schedule privacy test);
+  - mark attendance 9 (including notes semantics), attendance sheet 2, guardian attendance and children enrolments 5;
+  - lock order, re-authorization and the slot backstop 5;
+  - class dates and sessions 1.
+- **Open:** E4 (invoices, demo payments, commission; an invoice requires an active enrolment, D-026); real two-process concurrency (E2c); applying M3 to `tuitionhub` (separate approval); frontend wiring of the core journey.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
