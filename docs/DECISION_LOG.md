@@ -621,6 +621,50 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Tests:** 86 new; `php artisan test` → **452 passed** (366 existing unchanged + 86). Unit (codes, normalisation, key, redaction; 9), create (17), accept (22), revoke invitation (12, including an unknown query field), revoke link (11), children (6), lock order and re-authorization (9).
 - **Open / not done:** real two-process concurrency (E2c; VP-42 is tested sequentially, the locks and unique keys are the backstop); guardian access for §10.5 and §11 comes with those endpoints; `active_enrollments` with the enrolment tables; in `log` OTP mode `phone_verified_at` is not real phone verification (C6); the D-022 items (L1, production `zend.exception_ignore_args=On`, trusted proxies) are unchanged.
 
+## D-024 — R3 schema for G5 classes and G6 attendance — **APPROVED by TuitionHub founders (2026-11-01); not yet migrated**
+
+- **Scope:** `docs/SPRINT_SCHEMA.md` Part 3 becomes the migration specification for `classes`, `class_fee_versions`, `class_sessions`, `class_enrollments` and `attendances` (M3: migrations `2026_10_29_000014`–`000018`). Contract → **v0.7.1**. Approved in the R3 corrections brief on 2026-11-01; Q38–Q56 are all **Decided (D-024)**. Nothing is migrated yet. M3 runs first only on `tuitionhub_test`, and applying it to `tuitionhub` needs its own approval.
+- **Contradictions resolved:**
+  - **X1:** `enrolled_on DATE` (contract), not the brief's `enrolled_at`.
+  - **X2:** a cancelled session frees its slot (contract v0.7.1 §10.1).
+  - **X3:** `max_students` NOT NULL, ≥ 1.
+  - **X4:** fee amount > 0.
+  - **X5:** fee versions are append-only except a single `effective_to` close.
+  - **X6:** enrolments `active|withdrawn`, sessions `scheduled|cancelled`.
+  - **X7:** withdraw and cancel endpoints proposed for E3 (contract §8.5, §10.6).
+- **Tenant and history invariants (database-enforced):**
+  - **Class and student share the institute:** `class_enrollments.institute_id` (new column) with two composite FKs: `(class_id, institute_id) → classes(id, institute_id)` and `(student_id, institute_id) → student_profiles(id, managing_institute_id)`.
+  - **Session and enrolment share the class:** `attendances.class_id` (new column) with `(session_id, class_id) → class_sessions(id, class_id)` and `(enrollment_id, class_id) → class_enrollments(id, class_id)`.
+  - **One active enrolment, unlimited history:** `active_flag = IF(status = 'active', 1, NULL)`, unique `(class_id, student_id, active_flag)`. Withdrawn rows are never reactivated, and re-enrolling creates a new row.
+  - **One non-cancelled session per slot:** `slot_flag = IF(status <> 'cancelled', 1, NULL)`, unique `(class_id, session_date, start_time, slot_flag)`.
+  - **One open fee version per class:** `current_flag = IF(effective_to IS NULL, 1, NULL)`, unique `(class_id, current_flag)`, plus unique `(class_id, effective_from)`. Non-overlap is a service rule under the class lock.
+  - **One mark per session and enrolment:** unique `(session_id, enrollment_id)`.
+  - Every FK is `ON DELETE RESTRICT` with no `CASCADE`, so sessions, enrolments and attendance history cannot be deleted from under each other.
+- **Enrolment dates (D-024 corrections):**
+  - `enrolled_on` may be in the future, but must lie within the class's `starts_on`–`ends_on`.
+  - A withdrawal requested before `enrolled_on` is stored as `withdrawn_on = enrolled_on`: a zero-length enrolment, never active.
+  - A withdrawal that would leave existing attendance outside the enrolment (attendance for a session dated `>= withdrawn_on`) → `409`.
+  - "Active on date `d`" means `enrolled_on <= d < withdrawn_on`.
+  - A future enrolment has status `active`, so it counts towards `max_students` from creation.
+- **Other decisions:**
+  - Q44: `attendances.notes VARCHAR(500)`.
+  - Q45: whole-minute `TIME` CHECKs.
+  - Q46: class transitions `draft → active → archived` (or `draft → archived`); `archived` is final.
+  - Q47: enrolment and session creation need an `active` class; `session_date` within the class dates.
+  - Q49: attendance audit payloads, with `notes_changed` only, never the note text.
+  - Q50: a session with attendance cannot be cancelled.
+  - Q51: guardians keep seeing past attendance after a withdrawal.
+  - Q53: model `App\Models\TuitionClass`, morph alias `class`.
+  - Q54: `current_fee` is the version in force today, otherwise the earliest future one.
+  - Q55: no attendance for future sessions.
+  - Q56: attendance serialised by the institute lock for the sprint.
+  - Fee versions and attendance have no `uuid`.
+- **Lock order** (extends D-022/D-023): `institutes` → `classes` → `class_fee_versions` → `class_sessions` → `class_enrollments` → `attendances` → `users` (shared only). Sessions always come before enrolments. Rows are locked by primary key; sets of rows come from plain reads after the class lock. G5/G6 never locks `student_profiles` explicitly.
+- **Validation plan:**
+  - VP-60–VP-83. M3 covers the database and model cases: VP-60–VP-75, VP-79, VP-80 and the database half of VP-81.
+  - VP-76–VP-78, VP-82 and VP-83 are E3 service tests.
+- **Pending:** M3 implementation and its verification record; the E3 plan, which finalises the §8.5/§10.6 permission and audit details; applying M3 to `tuitionhub` (separate approval).
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
