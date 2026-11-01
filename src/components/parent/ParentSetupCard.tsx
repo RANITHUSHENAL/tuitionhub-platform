@@ -4,7 +4,7 @@ import { ArrowRightIcon } from 'lucide-react';
 import { LinkButton } from '../ui/Button';
 import { StepDot } from './ParentStages';
 import { useAuth } from '../../contexts/AuthContext';
-import { connectChildPath, nextSetupStep, parentSetupSteps } from '../../utils/parentSetup';
+import { nextSetupStep, parentSetupSteps } from '../../utils/parentSetup';
 
 /**
  * Profile-completion checklist. Shows what is done and what is left, with one
@@ -22,8 +22,8 @@ export function ParentSetupCard({ welcome = false }: {welcome?: boolean;}) {
         <div className="max-w-xl">
           <h2 className="text-h2 text-ink">{welcome ? 'Welcome to TuitionHub' : 'Finish setting up'}</h2>
           <p className="mt-1 text-small text-ink-soft">
-            Complete your parent profile and connect your child to start managing their tuition
-            journey.
+            Complete your parent profile, then link your child with the invitation code their
+            institute gives you.
           </p>
         </div>
         <div className="text-right">
@@ -49,13 +49,7 @@ export function ParentSetupCard({ welcome = false }: {welcome?: boolean;}) {
                   {s.label} <span className="font-normal text-ink-soft">· {s.statusLabel}</span>
                 </p>
                 <p className="text-caption text-ink-soft">
-                  {s.status === 'locked' ?
-                  s.id === 'verification' ?
-                  'Available after your parent profile is complete.' :
-                  'Available once you are a verified guardian.' :
-                  s.status === 'waiting' ?
-                  'A reviewer is checking it — usually within a few hours. Nothing else is blocked.' :
-                  s.why}
+                  {s.why}
                 </p>
               </div>
               {s.status === 'todo' ?
@@ -73,8 +67,8 @@ export function ParentSetupCard({ welcome = false }: {welcome?: boolean;}) {
           <LinkButton to="/parent/profile" size="sm" variant="secondary">
             Complete parent profile
           </LinkButton>
-          <LinkButton to={connectChildPath(user)} size="sm" variant="secondary">
-            Connect a child
+          <LinkButton to="/parent/family" size="sm" variant="secondary">
+            Family
           </LinkButton>
         </div>
         <Link to="/search" className="inline-flex items-center gap-1 text-small font-medium text-forest">

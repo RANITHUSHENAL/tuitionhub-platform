@@ -20,8 +20,8 @@ const points = [
 },
 {
   icon: <FileQuestionIcon className="h-4.5 w-4.5" />,
-  title: 'Exams and results',
-  body: 'Timed online papers from your teacher, with marks and the class average after.'
+  title: 'Exams and results · coming soon',
+  body: 'Planned: timed online papers from your teacher, with marks and the class average after.'
 }];
 
 

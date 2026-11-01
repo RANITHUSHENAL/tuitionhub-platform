@@ -80,9 +80,12 @@ export const teacherActivity = [
 { id: 'ta-4', teacher: 'Mr. N. Perera', action: 'Added online link', target: 'A/L Physics · tonight', time: '4 hours ago' }];
 
 
-/** Sample daily totals: paid by parents, TuitionHub fee, and the amount owed to the institute (not a payout). */
+/**
+ * Sample daily payments: how many parents paid and the class fees owed to the institute (not a
+ * payout). The TuitionHub fee and parent total are derived with the flat demo fee in demoFees.ts.
+ */
 export const dailyPayments = [
-{ id: 'dp-4', date: '20 Mar 2026', collected: 154200, fee: 3084, net: 151116 },
-{ id: 'dp-1', date: '19 Mar 2026', collected: 268400, fee: 5368, net: 263032 },
-{ id: 'dp-2', date: '18 Mar 2026', collected: 192000, fee: 3840, net: 188160 },
-{ id: 'dp-3', date: '17 Mar 2026', collected: 341600, fee: 6832, net: 334768 }];
+{ id: 'dp-4', date: '20 Mar 2026', payments: 48, owedToInstitute: 144000 },
+{ id: 'dp-1', date: '19 Mar 2026', payments: 84, owedToInstitute: 252000 },
+{ id: 'dp-2', date: '18 Mar 2026', payments: 60, owedToInstitute: 180000 },
+{ id: 'dp-3', date: '17 Mar 2026', payments: 105, owedToInstitute: 315000 }];

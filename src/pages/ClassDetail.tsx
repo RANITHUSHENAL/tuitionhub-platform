@@ -18,6 +18,7 @@ import { Toast, EmptyState } from '../components/ui/States';
 import { ClassCardMini } from '../components/cards/ClassCard';
 import { classById, classes } from '../data/classes';
 import { lkr, percent } from '../utils/format';
+import { DEMO_PLATFORM_FEE, demoParentTotal } from '../utils/demoFees';
 import { useAuth } from '../contexts/AuthContext';
 
 export function ClassDetail() {
@@ -134,7 +135,7 @@ export function ClassDetail() {
               <h2 className="text-h3 text-ink">What the institute shares with parents</h2>
               <ul className="mt-3 grid gap-2 text-small text-ink-soft sm:grid-cols-2">
                 <li>Attendance marked per session</li>
-                <li>Marks for every assessment, with class average</li>
+                <li>Marks and class averages (coming soon)</li>
                 <li>Monthly invoice and payment receipt</li>
                 <li>Announcements by app and SMS</li>
               </ul>
@@ -170,8 +171,8 @@ export function ClassDetail() {
               </p>
               <p className="mt-1 text-h1 text-ink">{lkr(item.feeMonthly)}</p>
               <p className="mt-1 text-caption text-ink-soft">
-                Paid monthly through TuitionHub · platform fee {lkr(Math.round(item.feeMonthly * 0.02))} shown
-                before you confirm
+                Paid monthly through TuitionHub · plus a {lkr(DEMO_PLATFORM_FEE)} TuitionHub fee, shown
+                before you confirm (demo illustration)
               </p>
 
               <div className="mt-4">
@@ -239,15 +240,15 @@ export function ClassDetail() {
               </Step> :
 
             <Step n={1} title="Choose the student">
-                Kasun Perera (Grade 12), Nethmi Perera (Grade 10), or add another child from Family.
+                Kasun Perera (Grade 12) or Nethmi Perera (Grade 10) — children linked to your account.
               </Step>
             }
             <Step n={2} title="Institute confirms the seat">
               Sarasavi Academy accepts or declines within one working day.
             </Step>
             <Step n={3} title="First invoice is issued">
-              {lkr(item.feeMonthly)} for the month, plus a {lkr(Math.round(item.feeMonthly * 0.02))} platform
-              fee, payable in Fees &amp; payments.
+              {lkr(item.feeMonthly)} for the month, plus a {lkr(DEMO_PLATFORM_FEE)} TuitionHub fee —{' '}
+              {lkr(demoParentTotal(item.feeMonthly))} in total (demo illustration), payable in Fees &amp; payments.
             </Step>
           </ol>
           <div className="flex gap-2 pt-1">

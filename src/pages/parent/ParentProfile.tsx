@@ -9,9 +9,9 @@ import { Toast } from '../../components/ui/States';
 import { useAuth } from '../../contexts/AuthContext';
 import { cities } from '../../data/classes';
 import { initialsOf } from '../../utils/format';
-import { parentSetupSteps } from '../../utils/parentSetup';
+import { CHILD_LINK_NOTE, parentSetupSteps } from '../../utils/parentSetup';
 
-/** Stage 2 — parent details. Separate from signup and from verification. */
+/** Stage 2 — parent details. Separate from signup; no ID documents are ever collected (C6). */
 export function ParentProfile() {
   const { user, update } = useAuth();
   const navigate = useNavigate();
@@ -25,7 +25,6 @@ export function ParentProfile() {
   const [saved, setSaved] = useState(false);
 
   const steps = parentSetupSteps(user);
-  const verification = steps[2];
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +49,7 @@ export function ParentProfile() {
       initials={user?.initials ?? 'PA'}
       nav={parentNav}
       title="Parent profile"
-      subtitle="Basic details about you. Separate from guardian verification.">
+      subtitle="Basic details about you.">
       
       <div className="max-w-4xl space-y-6">
         <ParentStages steps={steps} current="profile" />
@@ -95,7 +94,7 @@ export function ParentProfile() {
               </div>
             </div>
             <div className="rounded-xl bg-surface-muted px-4 py-3 text-caption text-ink-soft">
-              Mobile <span className="font-medium text-ink">{user?.phone}</span> · verified
+              Mobile <span className="font-medium text-ink">{user?.phone}</span> · used to sign in
             </div>
             <Button type="submit" className="w-full sm:w-auto">
               {next ? 'Save and continue' : 'Save profile'}
@@ -104,21 +103,11 @@ export function ParentProfile() {
 
           <aside className="space-y-4">
             <section className="rounded-2xl border border-line bg-white p-5">
-              <h2 className="text-h3 text-ink">Guardian verification</h2>
-              <p className="mt-1 text-caption font-medium text-ink-soft">{verification.statusLabel}</p>
-              <p className="mt-2 text-small text-ink-soft">
-                A separate step with your ID. You only need it to connect a child and see their
-                records.
-              </p>
-              {verification.status === 'todo' ?
-              <Button variant="secondary" size="sm" className="mt-3" onClick={() => navigate(verification.to)}>
-                  {verification.action}
-                </Button> :
-              null}
+              <h2 className="text-h3 text-ink">Linking your child</h2>
+              <p className="mt-2 text-small text-ink-soft">{CHILD_LINK_NOTE}</p>
             </section>
             <p className="px-1 text-caption text-ink-faint">
-              We never ask for your ID on this page. Institutes see your name and relationship,
-              never your documents.
+              TuitionHub never asks for ID documents. Institutes see your name and relationship.
             </p>
           </aside>
         </div>

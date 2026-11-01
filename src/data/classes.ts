@@ -116,10 +116,10 @@ export const classes: TuitionClass[] = [
   status: 'full',
   summary: 'Past paper drilling with weekly timed practice.',
   description:
-  'Strictly a paper class — theory is assumed. Every session is a timed paper followed by full discussion. Marks are entered the same evening and visible to parents.',
+  'Strictly a paper class — theory is assumed. Every session is a timed paper followed by full discussion.',
   highlights: [
   'Timed paper every session',
-  'Same-day mark entry',
+  'Full discussion after every paper',
   'Term ranking within the class'],
 
   mapX: 30,

@@ -1,10 +1,10 @@
 import React from 'react';
-import { BuildingIcon, CheckIcon, ClipboardCheckIcon, FileQuestionIcon, MegaphoneIcon, PencilLineIcon, PresentationIcon } from 'lucide-react';
+import { BuildingIcon, CheckIcon, ClipboardCheckIcon, LayersIcon, MegaphoneIcon, PresentationIcon } from 'lucide-react';
 import { LinkButton } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 
-const independent = ['Create your own classes and list them publicly', 'Set schedules and fees', 'Track payments for your classes', 'Attendance, marks, exams and announcements'];
-const institute = ['Request to join your institute — they approve', 'See only the classes assigned to you', 'Mark attendance, enter marks, set exams', 'The institute keeps fees and admin'];
+const independent = ['Create your own classes and list them publicly', 'Set schedules and fees', 'Track payments for your classes', 'Attendance and announcements (marks and exams coming soon)'];
+const institute = ['Request to join your institute — they approve', 'See only the classes assigned to you', 'Mark attendance (marks and exams coming soon)', 'The institute keeps fees and admin'];
 
 /** Teachers as a first-class stakeholder, independent of institutes. */
 export function TeacherSection() {
@@ -16,7 +16,7 @@ export function TeacherSection() {
             <p className="text-caption font-medium uppercase tracking-wide text-clay">For teachers</p>
             <h2 className="mt-2 text-h1 text-ink">Built for teachers</h2>
             <p className="mt-3 max-w-xl text-body text-ink-soft">
-              Your classes, your students, your marks — organised in one place, whether you run
+              Your classes, your students, your attendance — organised in one place, whether you run
               your own classes, teach at an institute, or both.
             </p>
 
@@ -73,11 +73,10 @@ function TeacherPreview() {
           <ClipboardCheckIcon className="h-4 w-4" /> Start attendance
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-4 gap-2">
+      <div className="mt-4 grid grid-cols-3 gap-2">
         {[
         { icon: ClipboardCheckIcon, label: 'Attendance' },
-        { icon: PencilLineIcon, label: 'Marks' },
-        { icon: FileQuestionIcon, label: 'Exam' },
+        { icon: LayersIcon, label: 'Classes' },
         { icon: MegaphoneIcon, label: 'Notice' }].
         map((a) =>
         <div key={a.label} className="flex flex-col items-center gap-1.5 rounded-xl border border-line bg-white px-2 py-3">
@@ -88,7 +87,7 @@ function TeacherPreview() {
       </div>
       <div className="mt-4 rounded-2xl border border-line bg-white p-4">
         <p className="text-caption text-ink-faint">Recent</p>
-        <p className="mt-1 text-small text-ink">18 new submissions — Waves Unit Test</p>
+        <p className="mt-1 text-small text-ink">Announcement sent to 32 students and guardians</p>
         <p className="mt-2 text-small text-ink">O/L Science closed · 11 of 12 present</p>
       </div>
     </div>);

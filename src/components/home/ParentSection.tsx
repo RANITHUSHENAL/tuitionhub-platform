@@ -11,7 +11,7 @@ export function ParentSection() {
         <SectionHeading
           eyebrow="For parents"
           title="Stay informed about your child's tuition"
-          body="Without chasing teachers or institutes for updates. One evening view: the next class, whether they have been going, the latest mark, and what you owe — for every child."
+          body="Without chasing teachers or institutes for updates. One evening view: the next class, whether they have been going, and what you owe — for every child. Marks are coming soon."
           action={
           <LinkButton to="/auth?role=parent" variant="secondary">
               Parent sign in
@@ -43,7 +43,8 @@ export function ParentSection() {
               <Tile
                 label="Latest result"
                 value="78 / 100"
-                detail="Physics Model Paper 3 · class average 64" />
+                detail="Example only — results are not available yet"
+                badge={<Badge tone="neutral">Coming soon</Badge>} />
               
               <Tile
                 label="March fees"
@@ -69,7 +70,7 @@ export function ParentSection() {
           <div className="space-y-5">
             <Point
               title="Visibility, not surveillance"
-              body="Parents see attendance, marks and payments for the classes they pay for. The product is built to reduce arguments about money, not to track a teenager's day." />
+              body="Parents see attendance and payments for the classes they pay for, with marks coming soon. The product is built to reduce arguments about money, not to track a teenager's day." />
             
             <Point
               title="Works without a smartphone"
@@ -81,7 +82,7 @@ export function ParentSection() {
             
             <Point
               title="One family, several children"
-              body="A verified guardian can link every child — even at different institutes — and pay each invoice to the right place." />
+              body="Each child's institute gives you an invitation code, so you can link every child — even at different institutes — and pay each invoice to the right place." />
             
             <Link
               to="/parent/fees"

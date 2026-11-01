@@ -4,6 +4,7 @@ import type {
   Invoice,
   MarkRecord } from
 '../types';
+import { DEMO_PLATFORM_FEE } from '../utils/demoFees';
 
 export const parentProfile = {
   name: 'Mrs. Chamari Perera',
@@ -79,6 +80,7 @@ export const attendanceRecords: AttendanceRecord[] = [
 { date: '02 Mar', className: 'Combined Maths', status: 'present', markedBy: 'Mr. R. Jayasinghe', method: 'QR scan', time: '7:58 AM' }];
 
 
+/** Sample invoices for the demo illustration only — not real bills. The fee is the flat demo fee. */
 export const invoices: Invoice[] = [
 {
   id: 'inv-2026-04',
@@ -86,7 +88,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Physics — Theory & Revision',
   institute: 'Sarasavi Academy',
   amount: 3200,
-  platformFee: 64,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'pending'
 },
 {
@@ -95,7 +97,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Chemistry — Revision Batch',
   institute: 'Lanka Science Centre',
   amount: 4000,
-  platformFee: 80,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'processing'
 },
 {
@@ -104,7 +106,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Combined Mathematics — Theory',
   institute: 'Sarasavi Academy',
   amount: 3000,
-  platformFee: 60,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'paid',
   paidOn: '03 Mar 2026',
   method: 'Card ending 4417',
@@ -116,7 +118,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Physics — Theory & Revision',
   institute: 'Sarasavi Academy',
   amount: 3200,
-  platformFee: 64,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'paid',
   paidOn: '03 Mar 2026',
   method: 'Card ending 4417',
@@ -128,7 +130,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Chemistry — Revision Batch',
   institute: 'Lanka Science Centre',
   amount: 4000,
-  platformFee: 80,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'failed'
 },
 {
@@ -137,7 +139,7 @@ export const invoices: Invoice[] = [
   className: 'A/L Chemistry — Revision Batch',
   institute: 'Lanka Science Centre',
   amount: 4000,
-  platformFee: 80,
+  platformFee: DEMO_PLATFORM_FEE,
   status: 'refunded',
   paidOn: '04 Jan 2026',
   method: 'Card ending 4417',

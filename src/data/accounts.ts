@@ -133,7 +133,7 @@ export const demoIdentities: {identity: Identity;label: string;description: stri
 },
 {
   label: 'Mr. Fernando · new parent',
-  description: 'Just signed up — profile, verification and children still to do',
+  description: 'Just signed up — profile and children still to do',
   identity: {
     id: 'id-fernando',
     name: 'Ruwan Fernando',

@@ -9,10 +9,10 @@ const statusStyle: Record<SetupStep['status'], string> = {
   locked: 'text-ink-faint'
 };
 
-/** Compact horizontal indicator of the four parent stages. */
+/** Compact horizontal indicator of the parent setup stages. */
 export function ParentStages({ steps, current }: {steps: SetupStep[];current?: SetupStep['id'];}) {
   return (
-    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Parent setup stages">
+    <ol className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Parent setup stages">
       {steps.map((s, i) => {
         const active = s.id === current;
         return (

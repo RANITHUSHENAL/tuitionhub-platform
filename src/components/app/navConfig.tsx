@@ -24,7 +24,7 @@ export const parentNav: ShellNavItem[] = [
 { to: '/parent/attendance', label: 'Attendance', icon: icon(ClipboardCheckIcon) },
 { to: '/parent/fees', label: 'Fees & payments', icon: icon(BanknoteIcon) },
 { to: '/parent/announcements', label: 'Announcements', icon: icon(MegaphoneIcon) },
-{ to: '/parent/profile', label: 'Profile & verification', icon: icon(UserIcon) }];
+{ to: '/parent/profile', label: 'Profile', icon: icon(UserIcon) }];
 
 
 export const studentNav: ShellNavItem[] = [

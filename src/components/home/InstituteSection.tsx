@@ -26,7 +26,7 @@ export function InstituteSection() {
         <SectionHeading
           eyebrow="For institutes"
           title="Run your institute more efficiently"
-          body="Classes, students, teachers, fees and payments in one place. Your teachers mark attendance and set exams for their own classes; you get the overview and the reports."
+          body="Classes, students, teachers, fees and payments in one place. Your teachers mark attendance for their own classes; you get the overview and the reports. Exams are coming soon."
           action={
           <LinkButton to="/auth?role=institute" variant="secondary">
               Institute sign-in
@@ -79,7 +79,7 @@ export function InstituteSection() {
               </p>
               <ul className="mt-2 space-y-1.5 text-small text-ink-soft">
                 <li>Mr. R. Jayasinghe marked attendance · Combined Maths 79/84 · 12 min ago</li>
-                <li>Mrs. S. Fernando entered marks · O/L Maths Paper 6 · 1 hour ago</li>
+                <li>Ms. P. Silva published an announcement · Speaking groups · 3 hours ago</li>
               </ul>
             </div>
           </div>

@@ -11,13 +11,13 @@ const journey = [
 { icon: SearchIcon, title: 'Discover', body: 'Find a class by subject, exam year, area and fee.' },
 { icon: UserPlusIcon, title: 'Join', body: 'Enrol online. The institute or teacher confirms the seat.' },
 { icon: CalendarCheckIcon, title: 'Attend', body: 'Scan the session QR at the hall, or join the online link.' },
-{ icon: GraduationCapIcon, title: 'Track progress', body: 'Marks and exam results land on the same enrolment.' },
+{ icon: GraduationCapIcon, title: 'Track progress', body: 'Coming soon: marks and exam results on the same enrolment.' },
 { icon: BanknoteIcon, title: 'Pay', body: 'The invoice names the class and who receives the money.' }];
 
 
 const responsibilities = [
 { area: 'Attendance', teacher: 'Marks it each session', student: 'Scans the session QR', parent: 'Sees it, or gets an SMS', institute: 'Reviews the overview' },
-{ area: 'Marks & exams', teacher: 'Sets papers, enters marks', student: 'Takes exams, sees results', parent: 'Sees published results', institute: 'Oversees results' },
+{ area: 'Marks & exams (coming soon)', teacher: 'Sets papers, enters marks', student: 'Takes exams, sees results', parent: 'Sees published results', institute: 'Oversees results' },
 { area: 'Announcements', teacher: 'Posts to their class', student: 'Receives', parent: 'Receives', institute: 'Posts institute-wide' },
 { area: 'Fees', teacher: 'Independent teachers collect', student: '—', parent: 'Pays, gets a receipt', institute: 'Collects and reconciles' }];
 

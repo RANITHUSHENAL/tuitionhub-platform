@@ -3,6 +3,7 @@ import type { AuthUser } from '../types';
 export type SetupStatus = 'done' | 'todo' | 'waiting' | 'locked';
 
 export interface SetupStep {
+  /** 'verification' is the retired guardian ID-check step, kept only so its hidden prototype screen compiles. */
   id: 'account' | 'profile' | 'verification' | 'children';
   label: string;
   status: SetupStatus;
@@ -12,14 +13,16 @@ export interface SetupStep {
   why: string;
 }
 
+/** C6 wording for every place a parent is told how a child gets linked. */
+export const CHILD_LINK_NOTE = "Your child's institute will provide an invitation code to link your account.";
+
 /**
- * Parent setup is four separate stages. Only the first happens at signup;
- * the rest are completed later, when a feature actually needs them.
+ * Parent setup is three stages (C6): the account, the parent profile, then a child linked with
+ * an invitation code from the child's institute. There is no ID document or face check, and the
+ * parent never creates or claims a child profile.
  */
 export function parentSetupSteps(user: AuthUser | null): SetupStep[] {
-  const v = user?.verification ?? 'none';
-  const verified = v === 'verified';
-  const profileDone = !!user?.profileComplete || verified;
+  const profileDone = !!user?.profileComplete || user?.verification === 'verified';
   const children = user?.childrenLinked ?? 0;
 
   return [
@@ -27,7 +30,7 @@ export function parentSetupSteps(user: AuthUser | null): SetupStep[] {
     id: 'account',
     label: 'Parent account',
     status: 'done',
-    statusLabel: 'Phone verified',
+    statusLabel: 'Signed in',
     to: '/parent/profile',
     action: '',
     why: 'Created with your mobile number.'
@@ -37,55 +40,24 @@ export function parentSetupSteps(user: AuthUser | null): SetupStep[] {
     label: 'Parent profile',
     status: profileDone ? 'done' : 'todo',
     statusLabel: profileDone ? 'Complete' : 'Incomplete',
-    to: '/parent/profile?next=/parent/verification',
+    to: '/parent/profile',
     action: 'Complete parent profile',
     why: 'Your relationship to your children and where you are. About a minute.'
   },
   {
-    id: 'verification',
-    label: 'Guardian verification',
-    status: verified ?
-    'done' :
-    v === 'in-progress' || v === 'review' ?
-    'waiting' :
-    profileDone ?
-    'todo' :
-    'locked',
-    statusLabel: verified ?
-    'Verified' :
-    v === 'in-progress' ?
-    'In review' :
-    v === 'review' ?
-    'Needs review' :
-    v === 'retry' ?
-    'Try again' :
-    'Not verified',
-    to: '/parent/verification?next=/parent/family',
-    action: v === 'retry' ? 'Retake ID photo' : 'Verify as guardian',
-    why: 'An ID check reviewed by a person. Needed before you can connect a child.'
-  },
-  {
     id: 'children',
     label: 'Children',
-    status: children > 0 ? 'done' : verified ? 'todo' : 'locked',
-    statusLabel: children > 0 ? `${children} connected` : 'No child connected',
+    status: children > 0 ? 'done' : 'waiting',
+    statusLabel: children > 0 ? `${children} linked` : 'No child linked yet',
     to: '/parent/family',
-    action: 'Connect a child',
-    why: 'See their attendance, marks and fees.'
+    action: '',
+    why: CHILD_LINK_NOTE
   }];
 
 }
 
 export function nextSetupStep(user: AuthUser | null) {
   return parentSetupSteps(user).find((s) => s.status === 'todo') ?? null;
-}
-
-/** Where "Connect a child" should take the parent right now. */
-export function connectChildPath(user: AuthUser | null) {
-  const steps = parentSetupSteps(user);
-  if (steps[1].status !== 'done') return '/parent/profile?next=/parent/verification';
-  if (steps[2].status !== 'done') return '/parent/verification?next=/parent/family';
-  return '/parent/family';
 }
 
 export function isParentSetupComplete(user: AuthUser | null) {

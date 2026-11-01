@@ -46,8 +46,8 @@ export function Hero() {
           </h1>
 
           <p className="mt-5 max-w-xl text-body text-ink-soft">
-            Find the right tuition class, then follow attendance, marks and fees in one
-            place — the same record for parents, students, teachers and institutes.
+            Find the right tuition class, then follow attendance and fees in one place — the
+            same record for parents, students, teachers and institutes. Marks are coming soon.
           </p>
 
           <form
@@ -134,9 +134,9 @@ function ProofPanel() {
           
           <ProofRow
             icon={<GraduationCapIcon className="h-4.5 w-4.5" />}
-            label="Latest result"
+            label="Results · coming soon"
             headline="Physics Model Paper 3 — 78 / 100"
-            detail="Class average 64 · published by the teacher 15 March" />
+            detail="An example of a planned feature, not available yet" />
           
           <ProofRow
             icon={<BanknoteIcon className="h-4.5 w-4.5" />}

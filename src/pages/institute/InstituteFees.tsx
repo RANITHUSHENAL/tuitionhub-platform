@@ -2,9 +2,10 @@ import React from 'react';
 import { DownloadIcon } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell';
 import { instituteNav } from '../../components/app/navConfig';
-import { PaymentBadge } from '../../components/ui/Badge';
+import { Badge, PaymentBadge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { dailyPayments, institute, instituteStats, roster } from '../../data/institute';
+import { DEMO_PLATFORM_FEE, demoDailyTotals } from '../../utils/demoFees';
 import { lkr } from '../../utils/format';
 
 export function InstituteFees() {
@@ -35,29 +36,39 @@ export function InstituteFees() {
 
           {/* C3: amounts owed to the institute are shown without any payout or settlement date. */}
           <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
-            <div className="border-b border-line px-6 py-4">
+            <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
               <h2 className="text-h3 text-ink">Payments by day</h2>
+              <Badge tone="neutral">Sample data</Badge>
             </div>
             <table className="w-full min-w-[40rem] text-left">
               <thead className="border-b border-line bg-surface-muted">
                 <tr className="text-caption uppercase tracking-wide text-ink-faint">
                   <th scope="col" className="px-6 py-3 font-medium">Date</th>
+                  <th scope="col" className="px-6 py-3 font-medium">Payments</th>
                   <th scope="col" className="px-6 py-3 font-medium">Paid by parents</th>
                   <th scope="col" className="px-6 py-3 font-medium">TuitionHub fee</th>
                   <th scope="col" className="px-6 py-3 font-medium">Owed to institute</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line text-small">
-                {dailyPayments.map((s) =>
-                <tr key={s.id}>
-                    <td className="px-6 py-4 text-ink">{s.date}</td>
-                    <td className="px-6 py-4 text-ink-soft">{lkr(s.collected)}</td>
-                    <td className="px-6 py-4 text-ink-soft">{lkr(s.fee)}</td>
-                    <td className="px-6 py-4 font-medium text-ink">{lkr(s.net)}</td>
-                  </tr>
-                )}
+                {dailyPayments.map((d) => {
+                  const totals = demoDailyTotals(d.payments, d.owedToInstitute);
+                  return (
+                    <tr key={d.id}>
+                      <td className="px-6 py-4 text-ink">{d.date}</td>
+                      <td className="px-6 py-4 text-ink-soft">{d.payments}</td>
+                      <td className="px-6 py-4 text-ink-soft">{lkr(totals.paidByParents)}</td>
+                      <td className="px-6 py-4 text-ink-soft">{lkr(totals.platformFee)}</td>
+                      <td className="px-6 py-4 font-medium text-ink">{lkr(totals.owedToInstitute)}</td>
+                    </tr>);
+
+                })}
               </tbody>
             </table>
+            <p className="border-t border-line px-6 py-3 text-caption text-ink-faint">
+              Demo illustration: a flat {lkr(DEMO_PLATFORM_FEE)} TuitionHub fee per payment, on top
+              of the class fee. Amounts owed are not payouts.
+            </p>
           </section>
 
           <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">

@@ -5,39 +5,31 @@ import { parentNav } from '../../components/app/navConfig';
 import { Badge, PaymentBadge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/DetailPanel';
-import { ErrorState, Toast } from '../../components/ui/States';
+import { ErrorState } from '../../components/ui/States';
 import { ChoiceGroup } from '../../components/ui/Field';
 import { invoices, parentProfile } from '../../data/people';
 import type { Invoice } from '../../types';
 import { lkr } from '../../utils/format';
 
-type PayStep = 'review' | 'processing' | 'done';
+type PayStep = 'review' | 'done';
 
+/**
+ * Sample invoices and a demo-only payment walkthrough. Nothing is charged, no invoice status
+ * changes and no receipt is issued; real invoices and the server-flagged demo payment come from
+ * the API in F5/E4. Fees use the flat demo fee (utils/demoFees.ts).
+ */
 export function ParentFees() {
   const [active, setActive] = useState<Invoice | null>(null);
   const [step, setStep] = useState<PayStep>('review');
   const [method, setMethod] = useState<'card' | 'bank'>('card');
-  const [toast, setToast] = useState(false);
-  const [paid, setPaid] = useState<string[]>([]);
 
   const outstanding = invoices.
-  filter((i) => (i.status === 'pending' || i.status === 'failed') && !paid.includes(i.id)).
+  filter((i) => i.status === 'pending' || i.status === 'failed').
   reduce((sum, i) => sum + i.amount + i.platformFee, 0);
 
   const open = (inv: Invoice) => {
     setActive(inv);
     setStep('review');
-  };
-
-  const pay = () => {
-    setStep('processing');
-    window.setTimeout(() => setStep('done'), 1200);
-  };
-
-  const finish = () => {
-    if (active) setPaid((p) => [...p, active.id]);
-    setActive(null);
-    setToast(true);
   };
 
   return (
@@ -96,12 +88,12 @@ export function ParentFees() {
           null}
 
           <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
-            <h2 className="border-b border-line px-6 py-4 text-h3 text-ink">
-              Invoices
-            </h2>
+            <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
+              <h2 className="text-h3 text-ink">Invoices</h2>
+              <Badge tone="neutral">Sample data</Badge>
+            </div>
             <ul className="divide-y divide-line">
               {invoices.map((inv) => {
-                const isPaid = paid.includes(inv.id);
                 return (
                   <li key={inv.id} className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
                     <div className="min-w-0">
@@ -120,11 +112,11 @@ export function ParentFees() {
                       <div className="text-right">
                         <p className="text-small font-medium text-ink">{lkr(inv.amount)}</p>
                         <p className="text-caption text-ink-faint">
-                          + {lkr(inv.platformFee)} platform fee
+                          + {lkr(inv.platformFee)} TuitionHub fee
                         </p>
                       </div>
-                      <PaymentBadge status={isPaid ? 'paid' : inv.status} />
-                      {(inv.status === 'pending' || inv.status === 'failed') && !isPaid ?
+                      <PaymentBadge status={inv.status} />
+                      {inv.status === 'pending' || inv.status === 'failed' ?
                       <Button size="sm" onClick={() => open(inv)}>
                           Pay
                         </Button> :
@@ -183,7 +175,7 @@ export function ParentFees() {
       <Modal
         open={active !== null}
         onClose={() => setActive(null)}
-        title={step === 'done' ? 'Payment confirmed' : 'Pay tuition fee'}>
+        title={step === 'done' ? 'Demo only — nothing was paid' : 'Pay tuition fee (demo)'}>
         
         {active ?
         <div className="space-y-5">
@@ -217,59 +209,35 @@ export function ParentFees() {
                 } />
               
                 </div>
-                <Button className="w-full" onClick={pay}>
-                  Pay {lkr(active.amount + active.platformFee)}
+                <Button className="w-full" onClick={() => setStep('done')}>
+                  Pay {lkr(active.amount + active.platformFee)} (demo)
                 </Button>
                 <p className="text-caption text-ink-faint">
-                  You will receive a receipt in the app and by SMS. Prototype only — no
-                  real payment is taken.
+                  Demo illustration — no real payment is taken and nothing is recorded.
                 </p>
               </> :
           null}
 
-            {step === 'processing' ?
-          <div className="flex flex-col items-center py-6 text-center">
-                <span className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-forest" />
-                <p className="mt-4 text-small font-medium text-ink">
-                  Confirming with the bank
-                </p>
-                <p className="mt-1 text-caption text-ink-soft">
-                  Do not close this window. We confirm against the gateway, not the
-                  redirect.
-                </p>
-              </div> :
-          null}
-
             {step === 'done' ?
           <>
-                <div className="rounded-xl bg-state-successBg px-4 py-4">
-                  <p className="text-small font-medium text-state-success">
-                    {lkr(active.amount + active.platformFee)} paid to {active.institute}
+                <div className="rounded-xl bg-surface-muted px-4 py-4">
+                  <p className="text-small font-medium text-ink">
+                    Demo illustration — no payment was taken
                   </p>
                   <p className="mt-1 text-caption text-ink-soft">
-                    Reference TH-5A18-2026.
+                    This invoice is unchanged and no receipt was issued. Real payments are not part
+                    of this preview.
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <Button className="flex-1" onClick={finish}>
-                    Done
-                  </Button>
-                  <Button variant="secondary" onClick={finish}>
-                    View receipt
-                  </Button>
-                </div>
+                <Button className="w-full" onClick={() => setActive(null)}>
+                  Close
+                </Button>
               </> :
           null}
           </div> :
         null}
       </Modal>
 
-      <Toast
-        open={toast}
-        message="Payment recorded"
-        detail="A receipt has been sent to your phone and saved in payment history."
-        onClose={() => setToast(false)} />
-      
     </AppShell>);
 
 }
