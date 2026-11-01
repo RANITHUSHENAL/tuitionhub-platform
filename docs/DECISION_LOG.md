@@ -665,6 +665,44 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - VP-76–VP-78, VP-82 and VP-83 are E3 service tests.
 - **Pending:** M3 implementation and its verification record; the E3 plan, which finalises the §8.5/§10.6 permission and audit details; applying M3 to `tuitionhub` (separate approval).
 
+## D-025 — M3 G5/G6 migrations and models verified — **Verified by automated tests 2026-11-01.**
+
+- **Scope:** five new migrations, appended after R2 (D-014 append-only):
+  - `2026_10_29_000014_create_classes_table`
+  - `…000015_create_class_fee_versions_table`
+  - `…000016_create_class_sessions_table`
+  - `…000017_create_class_enrollments_table`
+  - `…000018_create_attendances_table`
+
+  They implement `docs/SPRINT_SCHEMA.md` Part 3 (D-024) exactly. Five models: `TuitionClass` (table `classes`), `ClassFeeVersion`, `ClassSession`, `ClassEnrollment`, `Attendance`. **No endpoints, services, seeders or packages.**
+- **Tenant isolation through composite FKs:**
+  - `class_enrollments (class_id, institute_id) → classes (id, institute_id)` and `(student_id, institute_id) → student_profiles (id, managing_institute_id)`: an enrolment's class and student always share the institute.
+  - `attendances (session_id, class_id) → class_sessions (id, class_id)` and `(enrollment_id, class_id) → class_enrollments (id, class_id)`: an attendance row's session and enrolment always share the class.
+  - Tested in all three mismatch directions (VP-60, VP-61). A class can't change institute while it has enrolments (`ON UPDATE NO ACTION`).
+- **Generated flags (STORED, nullable):**
+  - `class_enrollments.active_flag`: one active enrolment per class and student, with any number of withdrawn rows (VP-62, VP-63).
+  - `class_fee_versions.current_flag`: one open fee version per class; plus unique `(class_id, effective_from)` (VP-68).
+  - `class_sessions.slot_flag`: one non-cancelled session per class, date and start time; cancelled sessions free the slot and stay as history (VP-66).
+  - Direct writes fail with MySQL 3105, and the models refuse them before any query (VP-72).
+- **History preserved:**
+  - Every FK is `ON DELETE RESTRICT`, with no cascades. Classes, sessions, enrolments, fee versions and markers with dependants can't be deleted (VP-67, VP-70, VP-73).
+  - Re-enrolling creates a new row and leaves the old one untouched (VP-64).
+  - Attendance survives a withdrawal (VP-70).
+  - A zero-length enrolment (`withdrawn_on = enrolled_on`) is accepted and never active (VP-81, database half).
+- **Manual attendance only:** `attendances_method_chk` allows only `manual`. `notes` is `VARCHAR(500)`, and longer input is an error, never truncated.
+- **Fee versions are append-only in the model:**
+  - `ClassFeeVersion` refuses any change to `class_id`, `amount`, `currency`, `billing_cycle`, `effective_from` and `created_by_user_id`.
+  - It allows `effective_to` to be set once, from NULL, and **refuses deletion** (VP-75).
+- **Future enrolments count toward capacity:** capacity counts `status = active`, and a future enrolment is `active` from creation (D-024; enforced by the E3 service).
+- **Other checks:**
+  - 17 CHECKs and 17 FKs, exactly as specified, all `RESTRICT`/`NO ACTION`.
+  - Every named index with its columns in order; DATE/TIME/DATETIME/DECIMAL types; no `deleted_at`; migration order (VP-79).
+  - Morph aliases `class`, `class_fee_version`, `class_session`, `class_enrollment`, `attendance`; public v4 UUIDs on classes, sessions and enrolments only; no internal ids or flags serialized (VP-80).
+- **Tests:** 45 new (structure 8, classes 5, fee versions 6, sessions 6, enrolments 9, attendance 6, models 5), plus cases added to `MorphMapTest` and `GeneratedColumnGuardTest`. `php artisan test` → **497 passed**.
+- **Schema verified only on `tuitionhub_test`** (D-010 guard, through `RefreshDatabase`). **The development database `tuitionhub` was not touched**; applying M3 there needs its own approval.
+- **Deferred:** the Pint style findings in `tests/Feature/Schema/Concerns/SchemaFixtures.php` and `app/Audit/AuditLogBuilder.php` (`fully_qualified_strict_types`, `ordered_imports`). Both predate M3 and are left for a separate style commit.
+- **Open:** E3 services and endpoints (VP-76–VP-78, VP-82, VP-83), including the proposed §8.5 withdraw and §10.6 cancel endpoints.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.

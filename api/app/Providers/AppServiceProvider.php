@@ -4,7 +4,11 @@ namespace App\Providers;
 
 use App\Audit\AuditContext;
 use App\Guardians\GuardianInviteCodes;
+use App\Models\Attendance;
 use App\Models\AuditLog;
+use App\Models\ClassEnrollment;
+use App\Models\ClassFeeVersion;
+use App\Models\ClassSession;
 use App\Models\GuardianInvitation;
 use App\Models\GuardianProfile;
 use App\Models\Institute;
@@ -15,6 +19,7 @@ use App\Models\StudentGuardian;
 use App\Models\StudentProfile;
 use App\Models\TeacherAssignment;
 use App\Models\TeacherProfile;
+use App\Models\TuitionClass;
 use App\Models\User;
 use App\Models\UserRole;
 use App\Otp\FakeOtpDriver;
@@ -125,6 +130,12 @@ class AppServiceProvider extends ServiceProvider
             'guardian_invitation' => GuardianInvitation::class,
             'student_guardian' => StudentGuardian::class,
             'audit_log' => AuditLog::class,
+            // G5/G6 (D-024).
+            'class' => TuitionClass::class,
+            'class_fee_version' => ClassFeeVersion::class,
+            'class_session' => ClassSession::class,
+            'class_enrollment' => ClassEnrollment::class,
+            'attendance' => Attendance::class,
         ]);
     }
 }
