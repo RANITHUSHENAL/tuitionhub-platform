@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Students\ListStudentsRequest;
+use App\Http\Requests\Students\ShowStudentRequest;
 use App\Http\Requests\Students\StoreStudentRequest;
 use App\Http\Resources\StudentResource;
 use App\Http\Responses\PaginatedResponse;
@@ -27,6 +28,14 @@ class StudentController extends Controller
         return StudentResource::make(StudentResource::query()->findOrFail($student->getKey()))
             ->response()
             ->setStatusCode(201);
+    }
+
+    /**
+     * GET /students/{uuid} (contract v0.10 §8.6, E2b; D-028): the §8 `Student` shape.
+     */
+    public function show(ShowStudentRequest $request, StudentProfile $student): JsonResponse
+    {
+        return StudentResource::make(StudentResource::query()->findOrFail($student->getKey()))->response();
     }
 
     public function index(ListStudentsRequest $request, Institute $institute): JsonResponse

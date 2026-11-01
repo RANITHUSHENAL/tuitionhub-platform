@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\ParentChildrenController;
 use App\Http\Controllers\Api\V1\PublicClassController;
 use App\Http\Controllers\Api\V1\SessionAttendanceController;
 use App\Http\Controllers\Api\V1\StudentController;
+use App\Http\Controllers\Api\V1\StudentGuardianController;
 use App\Http\Controllers\Api\V1\TeacherProfileController;
 use App\Http\Middleware\BindAuditContext;
 use App\Http\Middleware\EnsureActiveUser;
@@ -25,7 +26,7 @@ use App\Http\Middleware\RequireStatefulFrontend;
 use Illuminate\Support\Facades\Route;
 
 /*
-| /api/v1 — contract v0.9. Session (cookie) auth only: bearer tokens are disabled (D-019).
+| /api/v1 — contract v0.10 (draft). Session (cookie) auth only: bearer tokens are disabled (D-019).
 */
 
 Route::prefix('v1')->group(function () {
@@ -98,5 +99,11 @@ Route::prefix('v1')->group(function () {
             Route::post('sessions/{session}/attendance', [SessionAttendanceController::class, 'store']);
             Route::get('sessions/{session}/attendance', [SessionAttendanceController::class, 'show']);
             Route::get('parents/me/children/{student}/attendance', ChildAttendanceController::class);
+
+            // E2b (§6.5, §8.6, §9.6, §9.7; D-028). Read-only: no writes, no audit rows.
+            Route::get('me/teacher-profile', [TeacherProfileController::class, 'show']);
+            Route::get('students/{student}', [StudentController::class, 'show']);
+            Route::get('students/{student}/guardians', [StudentGuardianController::class, 'guardians']);
+            Route::get('students/{student}/guardian-invitations', [StudentGuardianController::class, 'invitations']);
         });
 });
