@@ -43,6 +43,36 @@ final class AuditPayload
         AuditAction::TEACHER_ASSIGNED => ['teacher_uuid', 'institute_uuid', 'status', 'joined_on'],
         // Never the student's name or date of birth (both are on the denylist above).
         AuditAction::STUDENT_CREATED => ['student_uuid', 'institute_uuid', 'grade_code', 'medium_code', 'exam_target_code'],
+        // Guardian events (D-023): UUIDs, statuses, the masked phone and internal link IDs only.
+        // Never the code, its hash, the full phone or the student's name.
+        AuditAction::GUARDIAN_INVITATION_CREATED => [
+            'invitation_uuid', 'student_uuid', 'institute_uuid', 'relationship', 'guardian_phone_masked', 'status', 'expires_at',
+        ],
+        AuditAction::GUARDIAN_INVITATION_ACCEPTED => ['invitation_uuid', 'student_uuid', 'status'],
+        AuditAction::GUARDIAN_INVITATION_REVOKED => ['invitation_uuid', 'student_uuid', 'status'],
+        // primary_link_id: internal student_guardians IDs, recorded only when the primary changes (Q37).
+        AuditAction::GUARDIAN_LINK_CREATED => ['student_uuid', 'guardian_uuid', 'relationship', 'is_primary', 'primary_link_id'],
+        AuditAction::GUARDIAN_LINK_REVOKED => ['student_uuid', 'guardian_uuid', 'relationship', 'is_primary', 'primary_link_id'],
+        // Classes and enrolments (D-026). The description is recorded only as a "changed" flag;
+        // students appear by UUID only, never by name.
+        AuditAction::CLASS_CREATED => self::CLASS_FIELDS,
+        AuditAction::CLASS_UPDATED => [...self::CLASS_FIELDS, 'description_changed'],
+        AuditAction::FEE_VERSION_CREATED => ['class_uuid', 'amount', 'currency', 'billing_cycle', 'effective_from', 'previous_effective_to'],
+        AuditAction::ENROLLMENT_CREATED => ['enrollment_uuid', 'class_uuid', 'student_uuid', 'status', 'enrolled_on'],
+        AuditAction::ENROLLMENT_WITHDRAWN => ['enrollment_uuid', 'class_uuid', 'student_uuid', 'status', 'enrolled_on', 'withdrawn_on'],
+        // Sessions and attendance (D-027). Attendance notes are free text and never recorded:
+        // a correction records only whether they changed (D-024 Q49).
+        AuditAction::SESSION_CREATED => self::SESSION_FIELDS,
+        AuditAction::SESSION_CANCELLED => self::SESSION_FIELDS,
+        AuditAction::ATTENDANCE_RECORDED => ['session_uuid', 'enrollment_uuid', 'status', 'method'],
+        AuditAction::ATTENDANCE_CORRECTED => ['session_uuid', 'enrollment_uuid', 'status', 'method', 'notes_changed'],
+    ];
+
+    private const SESSION_FIELDS = ['session_uuid', 'class_uuid', 'session_date', 'start_time', 'end_time', 'status'];
+
+    private const CLASS_FIELDS = [
+        'class_uuid', 'institute_uuid', 'teacher_uuid', 'title', 'status', 'mode', 'max_students', 'starts_on', 'ends_on',
+        'public_listing', 'subject_code', 'grade_code', 'stream_code', 'exam_target_code', 'medium_code', 'syllabus_code',
     ];
 
     /**

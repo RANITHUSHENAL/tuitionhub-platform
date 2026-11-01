@@ -22,12 +22,12 @@ class OtpCodeHasher
         $this->key();
     }
 
-    public function codeHash(string $challengeUuid, string $phone, string $code): string
+    public function codeHash(string $challengeUuid, #[\SensitiveParameter] string $phone, #[\SensitiveParameter] string $code): string
     {
         return hash_hmac('sha256', $challengeUuid.'|'.$phone.'|'.$code, $this->key());
     }
 
-    public function matches(string $storedHash, string $challengeUuid, string $phone, string $code): bool
+    public function matches(string $storedHash, string $challengeUuid, #[\SensitiveParameter] string $phone, #[\SensitiveParameter] string $code): bool
     {
         return hash_equals($storedHash, $this->codeHash($challengeUuid, $phone, $code));
     }
@@ -35,7 +35,7 @@ class OtpCodeHasher
     /**
      * The raw IP is never stored; a keyed hash allows correlation without keeping the address.
      */
-    public function ipHash(?string $ip): ?string
+    public function ipHash(#[\SensitiveParameter] ?string $ip): ?string
     {
         if ($ip === null || $ip === '') {
             return null;

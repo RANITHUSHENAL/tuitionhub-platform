@@ -18,5 +18,5 @@ interface OtpDriver
      */
     public function assertAvailable(): void;
 
-    public function send(string $phone, string $code): void;
+    public function send(#[\SensitiveParameter] string $phone, #[\SensitiveParameter] string $code): void;
 }

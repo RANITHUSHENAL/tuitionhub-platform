@@ -60,8 +60,15 @@ return [
             'strict' => true,
             'engine' => null,
             'timezone' => env('DB_TIMEZONE', '+00:00'),
+            // D-022: this application's sessions only (not the server-wide default of 50 s), so a
+            // request blocked on a row lock fails fast as a 503 instead of hanging.
+            'lock_wait_timeout' => (int) env('DB_LOCK_WAIT_TIMEOUT', 10),
+            // D-022: query exception messages show the SQL with ? placeholders, never the bound
+            // values (phones, names, hashes), so they cannot leak into logs.
+            'mask_bindings_in_exception_messages' => true,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                Mysql::ATTR_INIT_COMMAND => 'SET SESSION innodb_lock_wait_timeout = '.(int) env('DB_LOCK_WAIT_TIMEOUT', 10),
             ]) : [],
         ],
 

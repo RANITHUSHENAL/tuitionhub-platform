@@ -173,6 +173,98 @@ trait SchemaFixtures
         ]);
     }
 
+    /**
+     * A fictional class at the institute, with its own teacher and the default lookups (G5.1).
+     */
+    protected function insertClass(int $instituteId, array $overrides = []): int
+    {
+        $this->fixtureSequence++;
+
+        return DB::table('classes')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'institute_id' => $instituteId,
+            'teacher_id' => $overrides['teacher_id'] ?? $this->insertTeacherProfile(),
+            'subject_id' => $overrides['subject_id'] ?? $this->lookupId('subjects', 'COMBINED_MATH', ['name' => 'Combined Mathematics', 'category' => 'core']),
+            'grade_id' => $overrides['grade_id'] ?? $this->gradeId(),
+            'stream_id' => null,
+            'exam_target_id' => $overrides['exam_target_id'] ?? $this->lookupId('exam_targets', 'AL_2027', ['name' => 'A/L 2027', 'exam' => 'al', 'year' => 2027]),
+            'medium_id' => $overrides['medium_id'] ?? $this->mediumId(),
+            'syllabus_id' => $overrides['syllabus_id'] ?? $this->lookupId('syllabi', 'local', ['name' => 'Local (National)']),
+            'title' => "Fictional Class {$this->fixtureSequence}",
+            'mode' => 'in_person',
+            'max_students' => 30,
+            'starts_on' => '2026-11-01',
+            'ends_on' => null,
+            'status' => 'active',
+            'public_listing' => 0,
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function insertFeeVersion(int $classId, array $overrides = []): int
+    {
+        return DB::table('class_fee_versions')->insertGetId(array_merge([
+            'class_id' => $classId,
+            'amount' => '2500.00',
+            'currency' => 'LKR',
+            'billing_cycle' => 'monthly',
+            'effective_from' => '2026-11-01',
+            'effective_to' => null,
+            'created_by_user_id' => $overrides['created_by_user_id'] ?? $this->insertUser(),
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function insertSession(int $classId, array $overrides = []): int
+    {
+        return DB::table('class_sessions')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'class_id' => $classId,
+            'session_date' => '2026-11-03',
+            'start_time' => '15:30:00',
+            'end_time' => '17:30:00',
+            'status' => 'scheduled',
+            'created_by_user_id' => $overrides['created_by_user_id'] ?? $this->insertUser(),
+        ], $this->timestamps(), $overrides));
+    }
+
+    /**
+     * $instituteId must be both the class's and the student's institute, or the composite FKs refuse it.
+     */
+    protected function insertEnrollment(int $classId, int $studentId, int $instituteId, array $overrides = []): int
+    {
+        return DB::table('class_enrollments')->insertGetId(array_merge([
+            'uuid' => (string) Str::uuid(),
+            'class_id' => $classId,
+            'student_id' => $studentId,
+            'institute_id' => $instituteId,
+            'status' => 'active',
+            'enrolled_on' => '2026-11-01',
+            'withdrawn_on' => null,
+        ], $this->timestamps(), $overrides));
+    }
+
+    protected function withdrawEnrollment(int $enrollmentId, string $withdrawnOn = '2026-12-01'): void
+    {
+        DB::table('class_enrollments')->where('id', $enrollmentId)->update([
+            'status' => 'withdrawn',
+            'withdrawn_on' => $withdrawnOn,
+            'updated_at' => now('UTC'),
+        ]);
+    }
+
+    protected function insertAttendance(int $sessionId, int $enrollmentId, int $classId, array $overrides = []): int
+    {
+        return DB::table('attendances')->insertGetId(array_merge([
+            'session_id' => $sessionId,
+            'enrollment_id' => $enrollmentId,
+            'class_id' => $classId,
+            'status' => 'present',
+            'method' => 'manual',
+            'notes' => null,
+            'marked_by_user_id' => $overrides['marked_by_user_id'] ?? $this->insertUser(),
+            'marked_at' => now('UTC'),
+        ], $this->timestamps(), $overrides));
+    }
+
     protected function insertAuditLog(array $overrides = []): int
     {
         return DB::table('audit_logs')->insertGetId(array_merge([

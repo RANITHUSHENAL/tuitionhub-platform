@@ -24,7 +24,8 @@ return [
 
     'allowed_headers' => ['Accept', 'Content-Type', 'X-XSRF-TOKEN', 'X-Requested-With'],
 
-    'exposed_headers' => [],
+    // The SPA reads Retry-After on 429s (OTP cooldown, rate limits; contract §1.4).
+    'exposed_headers' => ['Retry-After'],
 
     'max_age' => 0,
 

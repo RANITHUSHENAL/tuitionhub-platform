@@ -77,7 +77,8 @@ class AuditLoggerTest extends TestCase
 
         $this->expectException(LogicException::class);
 
-        $this->record('class.created', $institute, $institute, []);
+        // A fictional name: class.created gained an allowlist in E3a (D-026).
+        $this->record('fictional.unlisted_action', $institute, $institute, []);
     }
 
     public function test_vp57_the_user_agent_is_limited_to_512_characters(): void

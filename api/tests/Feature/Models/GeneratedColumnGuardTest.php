@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Models;
 
+use App\Models\ClassEnrollment;
+use App\Models\ClassFeeVersion;
+use App\Models\ClassSession;
 use App\Models\GuardianInvitation;
 use App\Models\InstituteStaff;
 use App\Models\Role;
@@ -32,6 +35,10 @@ class GeneratedColumnGuardTest extends TestCase
             [GuardianInvitation::query()->findOrFail($this->insertInvitation($student, $institute)), 'pending_flag'],
             [StudentGuardian::query()->findOrFail($this->insertGuardianLink($student, $this->insertGuardianProfile())), 'active_flag'],
             [StudentGuardian::query()->findOrFail($this->insertGuardianLink($student, $this->insertGuardianProfile())), 'primary_flag'],
+            // G5/G6 (D-024, VP-72).
+            [ClassFeeVersion::query()->findOrFail($this->insertFeeVersion($class = $this->insertClass($institute))), 'current_flag'],
+            [ClassSession::query()->findOrFail($this->insertSession($class)), 'slot_flag'],
+            [ClassEnrollment::query()->findOrFail($this->insertEnrollment($class, $student, $institute)), 'active_flag'],
         ];
 
         foreach ($cases as [$model, $column]) {

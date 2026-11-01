@@ -548,6 +548,303 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Tests:** 48 new; `php artisan test` → **342 passed** (294 existing unchanged + 48), about 3311 assertions. The assertion count can differ by one or two between runs because the query-log tests assert once per query, and the database session driver's garbage-collection lottery occasionally adds a query; the test count is stable. Covered: `401`, `403` (incl. `institute_suspended`), cross-tenant `404`, `409`, `422`, exact shapes, no internal IDs, audit actor/IP/user agent and context isolation across E1b writes, rollback on audit failure (assignment, student), and re-authorization under the row lock (revoked admin, ended staff row, suspension).
 - **Not done / pending:** §6.4 (classes); trusted proxies (D-019); real-browser SPA testing.
 
+## D-022 — H1 concurrency and logging hardening — **Verified by automated tests 2026-11-01**
+
+- **Scope:** locking conventions, a bounded retry for lost concurrency races, fixes for two reachable deadlocks (C-1, C-2), an app-only lock wait timeout, and logging privacy. **No migrations, no new packages**; nothing ran against `tuitionhub`. Contract → **v0.6.1** (§1.4 `503` "service busy"; §4.1 send after commit). The E2 decision record planned as D-022 becomes **D-023**.
+- **Verified facts (code and server read 2026-11-01):** MySQL 8.4.13 runs REPEATABLE READ, `innodb_lock_wait_timeout` 50 s (server default), `innodb_rollback_on_timeout` 0, deadlock detection on. `zend.exception_ignore_args` is Off in this PHP, so stack traces include argument values (strings up to 15 characters in `getTraceAsString()`). Laravel 13's `DB::transaction($callback, $attempts)` retries only an outermost transaction; a nested one throws `DeadlockException` (wrapping the original `QueryException`) for a deadlock **and for a lock wait timeout**, because its `ConcurrencyErrorDetector` matches both messages. `QueryException` messages include bound values unless the connection sets `mask_bindings_in_exception_messages`. Nothing in `bootstrap/app.php` stopped business-rule or OTP exceptions from being logged.
+- **Locking conventions** (all services; full matrix in the E2 lock review):
+  - **Pattern U (self-scoped):** lock the caller's own `users` row first (`UserProfileService`, `InstituteService::create`, `OtpService::verify` after the challenge). Rule: after taking an exclusive `users` lock, never wait on a row of an institute-scoped table that another transaction may hold.
+  - **Pattern I (institute-scoped):** lock the `institutes` row first, then that institute's rows (`student_profiles` → `guardian_invitations` → `guardian_profiles` → `student_guardians`; or `institute_staff` / `teacher_institute` → `user_roles`), each **by primary key**. `users` rows are taken **only with shared locks**, last: InnoDB's foreign-key checks (`created_by_user_id`, `invited_by_user_id`, `linked_by_user_id`, `revoked_by_user_id`, `audit_logs.user_id`, …) take them implicitly, plus any explicit `FOR SHARE` re-check, in primary-key order.
+  - **No range locking reads or range updates** in either pattern: sets of rows are found with a plain read taken after the first lock, then changed by primary key. Under REPEATABLE READ a range lock also locks index gaps, and two transactions holding the same gap deadlock on their inserts.
+  - Why not "users first" everywhere: every committed Pattern I service already takes shared `users` locks after its institute lock, so users-first in a new path would deadlock against them (for example a staff member who is also a parent at the same institute). Making it consistent would mean rewriting every Pattern I service.
+- **Defects found and their status:**
+  - **C-1 (fixed):** `TeacherProfileService::upsert` held an exclusive `users` lock and then updated `teacher_profiles`, while `TeacherAssignmentService::assign` holds the institute and a shared lock on that profile row and waits for a shared lock on its actor. An admin assigning themselves while saving their profile could deadlock. Now: plain read of the profile id, lock the profile **by primary key**, then re-read the account status with a **current read** (`FOR SHARE`); a suspended account is still refused (tested with a stale in-memory model). A first-time insert relies on `teacher_profiles_user_id_unique` plus a locking re-read, never a gap lock.
+  - **C-2 (fixed):** `OtpService::request` expired older challenges with a range `UPDATE` on (`phone`, `purpose`, …), then inserted; two first-time requests for different phones in the same index gap could deadlock. Now: plain read of the open challenge ids, then `UPDATE … WHERE id IN (…)`.
+  - **L1 (documented, not fixed):** `RoleAssignmentService::revoke` locks a `user_roles` range (its condition is not a unique key). It could deadlock with `InstituteService::create` only when the revoking actor is the same user, and no endpoint calls revoke. To fix when the first role-revoke endpoint is built (lock by primary key or by `scope_key`).
+  - **D-1 (fixed in `SPRINT_SCHEMA.md` G4.2/G4.3):** the accept rule ("select the invitation by `code_hash` FOR UPDATE", then lock the student) contradicted student-first, and create locked a pending-invitation range. Both are rewritten to Pattern I with primary-key locks only.
+- **`App\Support\Transactions::retrying()`:** at most **3** attempts; retries **only** a deadlock (SQLSTATE `40001` / MySQL 1213), found by walking the exception chain. Everything else (validation, authorization, business rules, unique-key violations, any other error) is rethrown unchanged on the first attempt. A lock wait timeout (1205) is not retried. Exhausted retries or a lock wait timeout → `ServiceBusyException` → **`503 {"message":"The service is busy. Please try again."}` with `Retry-After: 1`**, plus one `db.service_busy` warning that holds only the reason and attempt count. Used by every write service (OTP request and verify, user name, teacher profile, institute create and update, students, teacher assignment and end, staff add and end, role grant and revoke). All of them write only to the database, so a retry is safe.
+  - **Nested calls propagate; only the outermost call retries.** Inside an outer transaction (`InstituteService::create` → `grant`; `StaffService::add`/`end` → `grant`/`revoke`) the helper runs the callback once through Laravel's nested transaction and lets **every** exception propagate unchanged: no catch, no log, no conversion. The outermost `retrying()` classifies it by walking the chain (`DeadlockException` → `QueryException` → MySQL code), so a nested deadlock retries the whole outer transaction (≤ 3 attempts) and a nested 1205 is still a `503` without retry. Classification, the `db.service_busy` warning and `ServiceBusyException` happen only at the outermost level.
+  - Correction found by the H1 pre-commit audit: the first draft converted a nested deadlock into `ServiceBusyException` inside the inner call, which the outer call could not recognise, so a deadlock in a nested service call was never retried (a 503 at once, nothing committed). Fixed and covered by regression tests through Laravel's real nested `DB::transaction()` machinery.
+- **OTP send after commit:** the code is generated and its challenge committed inside `Transactions::retrying()`; the code is sent **after** it returns, so a rolled-back attempt's code is never sent. The per-phone cache lock now lasts `3 × lock wait timeout + 15 s` (45 s), so it outlives every retried attempt plus the send; with the old 10 s lease a second request for the same phone could have started while the first was still retrying.
+  - **Failed delivery (compensation):** if the send fails, the committed challenge is retired by primary key (`expires_at` = now). The **original delivery exception is always rethrown**. If retiring itself fails, its error is swallowed and one `otp.retire_failed` warning is logged with the challenge UUID only (never the phone, the code or the database error); the unsent code then stays valid until its normal expiry (5 minutes), and nobody received it.
+- **Lock wait timeout:** `innodb_lock_wait_timeout = 10` for this application's MySQL sessions only, via `Pdo\Mysql::ATTR_INIT_COMMAND` (`DB_LOCK_WAIT_TIMEOUT`, default 10); the server-wide default (50 s) is untouched.
+- **Logging privacy:**
+  - `mask_bindings_in_exception_messages => true` on the `mysql` connection: query exception messages show `?`, never the bound phone, name or hash. MySQL's own "Duplicate entry '…'" text still contains the duplicate key's values, which is why business-rule exceptions must not be logged.
+  - `dontReport`: `DomainRuleException`, `InvalidOtpException`, `OtpThrottledException`, `AccountSuspendedException`, `ServiceBusyException` (expected outcomes, previously logged with their wrapped database errors on every occurrence). `OtpUnavailableException` is still reported (an operational fault).
+  - `#[\SensitiveParameter]` on every OTP code and phone parameter (`OtpService`, `OtpCodeHasher` including the IP hash, all three drivers and the `OtpDriver` interface, `PhoneMasker::mask`). Tested: traces of failing calls contain neither the phone nor the code, and show `SensitiveParameterValue`.
+- **Tests:** 23 new; `php artisan test` → **366 passed (3448 assertions)** on two consecutive runs (343 existing unchanged + 23). After the audit: nested deadlock retried by the outermost caller (one real commit, counted with `TransactionCommitting`, no warning); nested deadlock on every attempt (3 outer attempts, `503`, one warning); nested lock wait timeout (no retry); nested non-concurrency failures propagate unchanged; and a failed retirement after a failed send (original error rethrown, `otp.retire_failed` with the UUID only). Retry behaviour is tested at the outermost transaction level (no wrapping test transaction): a session-scoped temporary table proves a failed attempt's writes are rolled back and only the committed attempt remains, and an OTP request whose first attempt deadlocks commits exactly one challenge and sends exactly its code; the committed rows are deleted afterwards.
+- **Residual risks and open items:**
+  - **45 s OTP lease:** the lease is a design bound, not a hard one (`innodb_lock_wait_timeout` limits each statement's wait, not a whole attempt's). If issuance plus the send ever outlasts it, a second request for the same phone and purpose can take the lock while the first has not committed; both plain reads then see no open challenge and no cooldown, so two codes can be valid until expiry. Both go only to that phone, the request rate limits still apply, and the first request's release cannot free the second's lock (owner-checked). A real SMS driver must use an HTTP timeout well under 15 s.
+  - **L1 open:** the `RoleAssignmentService::revoke` `user_roles` range lock (above).
+  - **Two-process concurrency open:** deadlocks are simulated with MySQL-shaped exceptions passed through Laravel's real transaction machinery, not provoked; a real two-connection harness is E2c (PHP here has no `mysqli`, and PDO has no asynchronous queries, so it needs a second process).
+  - **Production `zend.exception_ignore_args=On`** in `php.ini` (deployment item): defence in depth alongside `#[\SensitiveParameter]`.
+  - **MySQL duplicate-entry messages may contain personal data:** "Duplicate entry '…' for key …" is MySQL's own message text, not a binding, so `mask_bindings_in_exception_messages` does not hide it. A unique violation that is not handled and mapped would log it.
+  - **E2 requirement:** the guardian-invitation pending unique key (`(student_id, guardian_phone, pending_flag)`) must map to `409` **without chaining the database error** (no `previous` exception), because that duplicate entry contains the guardian's phone. Recorded here for D-023 (E2); D-023 stays reserved for E2.
+  - A real SMS driver must still send only after commit (now enforced by `OtpService` itself); trusted proxies (D-019).
+
+## D-023 — E2 guardian invitations, linking, revocation and children — **Verified by automated tests 2026-11-01**
+
+- **Scope:** `POST /students/{uuid}/guardian-invitations` (§9.1), `POST /guardian-invitations/accept` (§9.2), `POST /guardian-invitations/{uuid}/revoke` (§9.3), `DELETE /students/{uuid}/guardian-links/{guardianUuid}` (§9.4) and `GET /parents/me/children` (§9.5). Contract → **v0.7**. **No migrations, no new packages**; the R2 tables were already applied. Nothing ran against `tuitionhub`.
+- **Decisions E2-1 – E2-9** (approved in the E2 implementation brief, 2026-11-01):
+  - **E2-1:** `active_enrollments` is always `[]` until the enrolment tables exist (contract note in §9.5); no class is invented.
+  - **E2-2:** accepting for a suspended institute → `403 institute_suspended`.
+  - **E2-3:** the children list includes students of suspended institutes (read-only).
+  - **E2-4:** inviting your own phone → `422` on `guardian_phone`; the inviter accepting their own invitation → the generic `422`.
+  - **E2-5:** an invitation may be revoked by its inviter (while still active staff there), **any admin of the same institute**, or `super_admin`.
+  - **E2-6:** guardian phones are accepted as local `0771234567` or E.164 `+94771234567` and stored as E.164.
+  - **E2-7:** accept is limited to **5 attempts per 15 minutes per user**, every attempt counting, on top of the general 60/min.
+  - **E2-8:** `409` reasons `invitation_pending`, `invitation_not_pending`, `link_already_active`.
+  - **E2-9:** an invitation from staff who later left stays valid until it expires (the inviter's current membership is not re-checked on accept; `linked_by_user_id` is still the inviter).
+- **Lock order (D-022 Option A, Pattern I):** `institutes` → `student_profiles` → `guardian_invitations` → `guardian_profiles` → `student_guardians`, each by primary key; `users` **shared only**, never exclusive. Sets of rows (pending invitations for a student and phone, active links, the next primary) are found with **plain reads after the institute lock**, then changed by primary key: no range locks, no range updates (tested through the executed SQL).
+  - **Create:** institute `FOR UPDATE` → re-authorize (`Gate::forUser`) → student `FOR UPDATE` → plain read of the pending row → an expired one is set to `expired` by primary key → insert → audit.
+  - **Accept:** lock-free lookup of `id`, `student_id`, `institute_id` by `code_hash` (malformed codes never reach the database) → institute → student → invitation (`FOR UPDATE` by id) → **one `LOCK IN SHARE MODE` read of the caller and the inviter, ordered by id** → checks → guardian profile (plain read; insert if missing; on a duplicate, a locking re-read by `user_id`) → plain reads of the active link and active primary → link insert → invitation update → two audit rows. The explicit shared `users` read follows `SPRINT_SCHEMA` G4.2 rule 2 (after the three exclusive locks, before any write); the later inserts take their implicit shared locks on rows this transaction already holds.
+  - **Revoke invitation:** institute → re-authorize → student → invitation. **Revoke link:** institute → re-authorize → student → the link by id → revoke (frees `primary_flag`) → the oldest remaining active link (`linked_at`, then `id`) by id → promote.
+  - All four writes use `Transactions::retrying()` (≤ 3 attempts on deadlock; nested calls propagate, D-022). Create generates its code **outside** the transaction, so a deadlock retry reuses it; a `code_hash` collision (not a concurrency error) gets a new code and a new transaction, up to **5** times, then `500`.
+- **Codes and the key:** `App\Guardians\GuardianInviteCodes`: 8 characters from `23456789ABCDEFGHJKMNPQRSTVWXYZ` with `random_int`, shown as `XXXX-XXXX`; normalised by upper-casing and removing spaces and hyphens; `code_hash` = HMAC-SHA256(normalised code, `GUARDIAN_INVITE_HMAC_KEY`). The key is read lazily (`base64:` supported, ≥ 32 bytes); missing or short → `503 {"message":"Guardian invitations are not available."}` for create and accept only (tested: another endpoint and `php artisan inspire` still work). `.env.example` has an empty `GUARDIAN_INVITE_HMAC_KEY=`; tests set a throwaway key.
+- **Generic 422** (`InvalidInvitationCodeException`, one message, never chained, not reported): malformed, unknown, used, revoked or expired codes; a phone mismatch; an unverified phone; the inviter accepting. A lazily expired invitation is **committed** as `expired` before the `422` (outcome pattern), and likewise before the `409` of a revoke. Check order on accept: account suspended → `403`; invitation state and expiry; phone and verification; inviter; **only then** institute suspended → `403` (so a suspension is revealed only to the invited guardian); then `409 link_already_active`.
+- **Primary guardian (Q25/Q37):** the first active link becomes primary under the student lock; revoking the primary promotes the oldest remaining active link in the same transaction; none left → no primary. `guardian_link.created` records `primary_link_id` old `null` → new id when the new link becomes primary; `guardian_link.revoked` records old → new (or `null`) when the primary changes. Internal link IDs only.
+- **Privacy:**
+  - `#[\SensitiveParameter]` on every parameter of `GuardianInviteCodes` (including the key), `GuardianInvitationService::create($guardianPhone)`, `accept($code)`, the private `insertInvitation($guardianPhone, $codeHash)`, and `SriLankanMobile::normalize`. Tested by reflection and through a real stack trace.
+  - Reporting: `InvalidInvitationCodeException` is in `dontReport` (expected outcome); `GuardianInviteUnavailableException` is **reported** (a configuration fault; its message never names the key).
+  - **Accepted timing difference:** a malformed code returns without any database query, while a well-formed code is looked up, and a known code with the wrong phone also takes the locking transaction, so response times differ between these cases. The response body is identical. Accepted: about 6.6 × 10¹¹ possible codes, 5 attempts per 15 minutes per user (E2-7), and a match also needs the caller's verified phone.
+  - The pending-invitation and active-link unique keys map to `409` **without chaining** the database error (its duplicate-entry text contains the guardian's phone); tested by forcing each backstop.
+  - Audit allowlists (§13): UUIDs, `relationship`, `status`, `expires_at`, `guardian_phone_masked` (`+9477*****67`), `is_primary`, `primary_link_id`. Tests scan the stored audit JSON and captured log output for the code, its hash, full phones and the student's name.
+  - Throttle keys use the user id only. Creating a guardian profile is not audited (no contract event).
+- **Implementation choices for founder review** (not stated by the contract or the decisions; reversible):
+  1. `super_admin` gets `403` on create (not a member, as for §8.1); teacher-only callers get `404` on every student guardian endpoint (no student data outside class rosters).
+  2. Revoke invitation: other staff of the institute `403`; an inviter who has left `404` (unrelated now).
+  3. Phone normalisation accepts exactly the two E2-6 forms; spaces, hyphens and `94…` without `+` are `422`.
+  4. Accept's `code` is a string of at most 32 characters; a missing, non-string or over-long value gets Laravel's normal `422` on `code`, not the generic message (it reveals nothing about any invitation).
+  5. Self-invite is checked after authorization, under the lock, so a caller who may not invite still gets `403`/`404`.
+  6. Revoke link resolves `guardianUuid` only after authorization; malformed, unknown, not a guardian and no active link are the same `404`.
+  7. The children list is ordered by `linked_at`, then id, with the normal four-key pagination `meta` (§1.3), although the §9.5 example shows `"meta": {}`.
+- **Tests:** 86 new; `php artisan test` → **452 passed** (366 existing unchanged + 86). Unit (codes, normalisation, key, redaction; 9), create (17), accept (22), revoke invitation (12, including an unknown query field), revoke link (11), children (6), lock order and re-authorization (9).
+- **Open / not done:** real two-process concurrency (E2c; VP-42 is tested sequentially, the locks and unique keys are the backstop); guardian access for §10.5 and §11 comes with those endpoints; `active_enrollments` with the enrolment tables; in `log` OTP mode `phone_verified_at` is not real phone verification (C6); the D-022 items (L1, production `zend.exception_ignore_args=On`, trusted proxies) are unchanged.
+
+## D-024 — R3 schema for G5 classes and G6 attendance — **APPROVED by TuitionHub founders (2026-11-01); applied to `tuitionhub` 2026-11-01 (batch 3)**
+
+- **Scope:** `docs/SPRINT_SCHEMA.md` Part 3 becomes the migration specification for `classes`, `class_fee_versions`, `class_sessions`, `class_enrollments` and `attendances` (M3: migrations `2026_10_29_000014`–`000018`). Contract → **v0.7.1**. Approved in the R3 corrections brief on 2026-11-01; Q38–Q56 are all **Decided (D-024)**. M3 ran first only on `tuitionhub_test` (D-025). It was then applied to the development database `tuitionhub` on 2026-11-01 as **batch 3**, after a read-only pre-flight and the founders' explicit approval with a confirmed backup (see D-025).
+- **Contradictions resolved:**
+  - **X1:** `enrolled_on DATE` (contract), not the brief's `enrolled_at`.
+  - **X2:** a cancelled session frees its slot (contract v0.7.1 §10.1).
+  - **X3:** `max_students` NOT NULL, ≥ 1.
+  - **X4:** fee amount > 0.
+  - **X5:** fee versions are append-only except a single `effective_to` close.
+  - **X6:** enrolments `active|withdrawn`, sessions `scheduled|cancelled`.
+  - **X7:** withdraw and cancel endpoints proposed for E3 (contract §8.5, §10.6).
+- **Tenant and history invariants (database-enforced):**
+  - **Class and student share the institute:** `class_enrollments.institute_id` (new column) with two composite FKs: `(class_id, institute_id) → classes(id, institute_id)` and `(student_id, institute_id) → student_profiles(id, managing_institute_id)`.
+  - **Session and enrolment share the class:** `attendances.class_id` (new column) with `(session_id, class_id) → class_sessions(id, class_id)` and `(enrollment_id, class_id) → class_enrollments(id, class_id)`.
+  - **One active enrolment, unlimited history:** `active_flag = IF(status = 'active', 1, NULL)`, unique `(class_id, student_id, active_flag)`. Withdrawn rows are never reactivated, and re-enrolling creates a new row.
+  - **One non-cancelled session per slot:** `slot_flag = IF(status <> 'cancelled', 1, NULL)`, unique `(class_id, session_date, start_time, slot_flag)`.
+  - **One open fee version per class:** `current_flag = IF(effective_to IS NULL, 1, NULL)`, unique `(class_id, current_flag)`, plus unique `(class_id, effective_from)`. Non-overlap is a service rule under the class lock.
+  - **One mark per session and enrolment:** unique `(session_id, enrollment_id)`.
+  - Every FK is `ON DELETE RESTRICT` with no `CASCADE`, so sessions, enrolments and attendance history cannot be deleted from under each other.
+- **Enrolment dates (D-024 corrections):**
+  - `enrolled_on` may be in the future, but must lie within the class's `starts_on`–`ends_on`.
+  - A withdrawal requested before `enrolled_on` is stored as `withdrawn_on = enrolled_on`: a zero-length enrolment, never active.
+  - A withdrawal that would leave existing attendance outside the enrolment (attendance for a session dated `>= withdrawn_on`) → `409`.
+  - "Active on date `d`" means `enrolled_on <= d < withdrawn_on`.
+  - A future enrolment has status `active`, so it counts towards `max_students` from creation.
+- **Other decisions:**
+  - Q44: `attendances.notes VARCHAR(500)`.
+  - Q45: whole-minute `TIME` CHECKs.
+  - Q46: class transitions `draft → active → archived` (or `draft → archived`); `archived` is final.
+  - Q47: enrolment and session creation need an `active` class; `session_date` within the class dates.
+  - Q49: attendance audit payloads, with `notes_changed` only, never the note text.
+  - Q50: a session with attendance cannot be cancelled.
+  - Q51: guardians keep seeing past attendance after a withdrawal.
+  - Q53: model `App\Models\TuitionClass`, morph alias `class`.
+  - Q54: `current_fee` is the version in force today, otherwise the earliest future one.
+  - Q55: no attendance for future sessions.
+  - Q56: attendance serialised by the institute lock for the sprint.
+  - Fee versions and attendance have no `uuid`.
+- **Lock order** (extends D-022/D-023): `institutes` → `classes` → `class_fee_versions` → `class_sessions` → `class_enrollments` → `attendances` → `users` (shared only). Sessions always come before enrolments. Rows are locked by primary key; sets of rows come from plain reads after the class lock. G5/G6 never locks `student_profiles` explicitly.
+- **Validation plan:**
+  - VP-60–VP-83. M3 covers the database and model cases: VP-60–VP-75, VP-79, VP-80 and the database half of VP-81.
+  - VP-76–VP-78, VP-82 and VP-83 are E3 service tests.
+- **Done since approval:** M3 implemented and verified (D-025) and applied to `tuitionhub` (batch 3); E3a and E3b finalised the §8.5/§10.6 details (D-026, D-027).
+
+## D-025 — M3 G5/G6 migrations and models verified — **Verified by automated tests 2026-11-01; applied to `tuitionhub` 2026-11-01 (batch 3).**
+
+- **Scope:** five new migrations, appended after R2 (D-014 append-only):
+  - `2026_10_29_000014_create_classes_table`
+  - `…000015_create_class_fee_versions_table`
+  - `…000016_create_class_sessions_table`
+  - `…000017_create_class_enrollments_table`
+  - `…000018_create_attendances_table`
+
+  They implement `docs/SPRINT_SCHEMA.md` Part 3 (D-024) exactly. Five models: `TuitionClass` (table `classes`), `ClassFeeVersion`, `ClassSession`, `ClassEnrollment`, `Attendance`. **No endpoints, services, seeders or packages.**
+- **Tenant isolation through composite FKs:**
+  - `class_enrollments (class_id, institute_id) → classes (id, institute_id)` and `(student_id, institute_id) → student_profiles (id, managing_institute_id)`: an enrolment's class and student always share the institute.
+  - `attendances (session_id, class_id) → class_sessions (id, class_id)` and `(enrollment_id, class_id) → class_enrollments (id, class_id)`: an attendance row's session and enrolment always share the class.
+  - Tested in all three mismatch directions (VP-60, VP-61). A class can't change institute while it has enrolments (`ON UPDATE NO ACTION`).
+- **Generated flags (STORED, nullable):**
+  - `class_enrollments.active_flag`: one active enrolment per class and student, with any number of withdrawn rows (VP-62, VP-63).
+  - `class_fee_versions.current_flag`: one open fee version per class; plus unique `(class_id, effective_from)` (VP-68).
+  - `class_sessions.slot_flag`: one non-cancelled session per class, date and start time; cancelled sessions free the slot and stay as history (VP-66).
+  - Direct writes fail with MySQL 3105, and the models refuse them before any query (VP-72).
+- **History preserved:**
+  - Every FK is `ON DELETE RESTRICT`, with no cascades. Classes, sessions, enrolments, fee versions and markers with dependants can't be deleted (VP-67, VP-70, VP-73).
+  - Re-enrolling creates a new row and leaves the old one untouched (VP-64).
+  - Attendance survives a withdrawal (VP-70).
+  - A zero-length enrolment (`withdrawn_on = enrolled_on`) is accepted and never active (VP-81, database half).
+- **Manual attendance only:** `attendances_method_chk` allows only `manual`. `notes` is `VARCHAR(500)`, and longer input is an error, never truncated.
+- **Fee versions are append-only in the model:**
+  - `ClassFeeVersion` refuses any change to `class_id`, `amount`, `currency`, `billing_cycle`, `effective_from` and `created_by_user_id`.
+  - It allows `effective_to` to be set once, from NULL, and **refuses deletion** (VP-75).
+- **Future enrolments count toward capacity:** capacity counts `status = active`, and a future enrolment is `active` from creation (D-024; enforced by the E3 service).
+- **Other checks:**
+  - 17 CHECKs and 17 FKs, exactly as specified, all `RESTRICT`/`NO ACTION`.
+  - Every named index with its columns in order; DATE/TIME/DATETIME/DECIMAL types; no `deleted_at`; migration order (VP-79).
+  - Morph aliases `class`, `class_fee_version`, `class_session`, `class_enrollment`, `attendance`; public v4 UUIDs on classes, sessions and enrolments only; no internal ids or flags serialized (VP-80).
+- **Tests:** 45 new (structure 8, classes 5, fee versions 6, sessions 6, enrolments 9, attendance 6, models 5), plus cases added to `MorphMapTest` and `GeneratedColumnGuardTest`. `php artisan test` → **497 passed**.
+- **Schema verified first on `tuitionhub_test`** (D-010 guard, through `RefreshDatabase`).
+- **Applied to the development database `tuitionhub` on 2026-11-01 (batch 3).**
+  - **Pre-flight**, read-only:
+    - the connection was confirmed as `tuitionhub` (environment `local`, MySQL 8.4.13);
+    - `migrate:status` showed everything through `000013` applied (batches 1–2) and only `000014`–`000018` pending;
+    - `migrate --pretend` showed only the five `CREATE TABLE`s and their own `ALTER`s, with no change to existing tables and no `CASCADE`/`SET NULL`;
+    - none of the five tables existed, and the parent key `student_profiles_id_institute_unique (id, managing_institute_id)` was present.
+  - **Applied** after the founders' explicit approval and their confirmation of a backup. `php artisan migrate` ran exactly the five migrations as batch 3, with no errors.
+  - **Verified afterwards:**
+    - no migration pending;
+    - 5 tables, empty;
+    - 17 CHECK constraints;
+    - 17 FKs, all `RESTRICT` on delete and `NO ACTION` on update;
+    - 11 unique keys;
+    - the three stored generated columns (`active_flag`, `current_flag`, `slot_flag`).
+  - No seeder ran, and no existing table was altered.
+- **Deferred:** the Pint style findings in `tests/Feature/Schema/Concerns/SchemaFixtures.php` and `app/Audit/AuditLogBuilder.php` (`fully_qualified_strict_types`, `ordered_imports`). Both predate M3 and are left for a separate style commit.
+- **Open:** E3 services and endpoints (VP-76–VP-78, VP-82, VP-83), including the proposed §8.5 withdraw and §10.6 cancel endpoints.
+
+## D-026 — E3a classes, fee versions, enrolments, teacher classes and catalogue — **Verified by automated tests 2026-11-01**
+
+- **Scope:** ten endpoints. Contract → **v0.8**. **No migrations, no packages**; nothing ran against `tuitionhub`.
+
+  | § | Endpoint |
+  |---|---|
+  | §7.1 | `POST /institutes/{uuid}/classes` |
+  | §7.2 | `GET /institutes/{uuid}/classes` |
+  | §7.3 | `GET /classes/{uuid}` (public route) |
+  | §7.4 | `PATCH /classes/{uuid}` |
+  | §7.5 | `GET /public/classes` (public route) |
+  | §6.4 | `GET /me/teacher/classes` |
+  | §8.3 | `POST /classes/{uuid}/enrollments` |
+  | §8.4 | `GET /classes/{uuid}/enrollments` |
+  | §8.5 | `POST /enrollments/{uuid}/withdraw` |
+- **Authorization:**
+  - **Policies:** `InstitutePolicy::createClass` and `::viewClasses`; new `ClassPolicy` (`view`, `update`, `viewEnrollments`, `enroll`) and `ClassEnrollmentPolicy::withdraw` (delegates to `enroll`).
+  - **Assigned teacher:** `TenantAccess::isAssignedTeacher` requires `classes.teacher_id` to be the caller's profile **and** an active assignment at the class's institute. An ended assignment loses access to private class data and rosters at once.
+  - **Order — visibility first** (review fix, see below): a caller who cannot see the class gets `404`; one who can see it but may not act gets `403`; an allowed caller at a suspended institute gets `institute_suspended` (except super_admin where allowed). Every service locks the institute row and authorizes again.
+- **Lock order (D-022/D-024):**
+  - Class create locks `institutes` only (the class and fee rows are new).
+  - Update: `institutes` → `classes`; the open fee version is closed by primary key.
+  - Enrol: `institutes` → `classes`.
+  - Withdraw: `institutes` → `classes` → `class_enrollments` (by id).
+  - Teacher assignments, active counts, duplicates and attendance are plain reads after the locks.
+  - All writes run in `Transactions::retrying()`. The active-enrolment unique key maps to `409 already_active` without the database error. Tested through the executed SQL.
+- **Accepted choices** (founders, 2026-11-01, in the E3a corrections brief):
+  1. **`super_admin`:** `403` on §7.1, §8.3 and §8.5 (not a member, as in §8.1). It may update classes (§7.4, contract) and read rosters (§8.4).
+  2. **Teacher-only callers:** `403` on the §7.2 institute list (FD-4). `404` on every endpoint of a class they cannot see, including private class pages, rosters and writes (see the visibility fix below).
+  3. **Public visibility** also needs the institute to be active (§3: suspension never reveals). The public class page reads an optional SPA session through the sanctum guard, and a suspended account counts as anonymous.
+  4. **Statuses:**
+     - Archived is final: any update → `409 class_archived`.
+     - Other disallowed transitions → `409 invalid_status_transition`.
+     - Enrolling into a draft or archived class → `409 not_active`.
+  5. **Dates:**
+     - Changing `starts_on`/`ends_on` must keep every active enrolment's `enrolled_on` inside the window (`422`).
+     - `enrolled_on` defaults to today (`Asia/Colombo`), as the sprint draft says.
+     - `withdrawn_on` is required and may not be in the future (`422`): a future date would free the place before the student leaves.
+  6. **Limits:**
+     - `max_students` is 1–10,000; a full class → `409 class_full`; a future enrolment counts at once (D-024).
+     - The fee is a string with exactly 2 decimals, greater than 0, LKR only, with exactly four keys. A `fee` in §7.4 always appends a version, and `previous_effective_to` is audited.
+  7. **Ordering:**
+     - §7.2: `title`, then id.
+     - §6.4: `starts_on`, then `title`, then id.
+     - §8.4: student `full_name`, then id.
+     - §7.5 is neutral: `starts_on`, `title`, `uuid`; no boost or rank.
+  8. **`AuditLoggerTest`** (VP-57) used `class.created` as its example of an action without an allowlist. It now uses a fictional action name, since E3a gives `class.created` an allowlist.
+- **Audit payloads** (§13): the class snapshot never includes the description, only `description_changed`; enrolment events never include the student's name.
+- **Review fix — consistent hidden-resource 404 (visibility first):**
+  - `ClassPolicy::update` and `::enroll`, and therefore `ClassEnrollmentPolicy::withdraw`, now check visibility (`canSeePrivateData`) first.
+  - A caller who cannot see the class gets `404`, including an unassigned teacher at the same institute. Previously that caller got `403`, which revealed that the private class existed.
+  - The assigned teacher and `super_admin` (on enrol and withdraw) can see the class, so they get `403`. Staff can see it, so they get `403` on update.
+  - Tested as a matrix: unassigned teacher 404 on show, roster, update, enrol and withdraw; assigned teacher 200 on show and roster, 403 on the writes; unrelated users 404 everywhere, also with invalid bodies.
+  - Contract §7.4, §8.3 and §8.5 wording updated within v0.8.
+- **Review fix — authorization before validation:**
+  - `EnrollmentService::withdraw` checked the `withdrawn_on` format and future date (`422`) before the transactional `Gate::authorize` (`403`/`404`). Both now run after authorization, inside the transaction. `EnrollmentService::enroll`'s `enrolled_on` format check moved the same way.
+  - Tested: a hidden enrolment with a future or malformed `withdrawn_on` is `404` over HTTP, and an `AuthorizationException` (404), not a `ValidationException`, from a direct service call. An allowed caller still gets the `422`.
+- **Carried forward:**
+  - **E3b (sessions and attendance):** the D-024 date boundaries apply.
+    - Session creation needs an `active` class, and `session_date` must lie within the class's `starts_on`–`ends_on`.
+    - Attendance is allowed only for enrolments active on the session's date (`enrolled_on <= d < withdrawn_on`), never for cancelled or future sessions.
+  - **E4 (invoices):** an invoice needs an **active** enrolment (contract §11.2). A withdrawn, or zero-length, enrolment cannot be invoiced.
+- **Tests:** 66 new; `php artisan test` → **563 passed (7054 assertions)** on two consecutive runs (497 existing + 66):
+  - create class 11, show 6, institute list 4, update 10, catalogue 3 (including the 60/min limit), teacher classes 2, visibility and validation order 5;
+  - enrol 10, roster 2, withdraw 7;
+  - lock order, re-authorization and the unique-key backstop 6.
+
+  `AuditLoggerTest` was adjusted as in item 8.
+- **Open:** E3b (sessions §10.1–§10.2, cancel §10.6, attendance §10.3–§10.5); real two-process concurrency (E2c).
+
+## D-027 — E3b sessions, cancellation, attendance and the guardian attendance view — **Verified by automated tests 2026-11-01**
+
+- **Scope:** contract → **v0.9**. **No migrations, no packages**; nothing ran against `tuitionhub`. With this, the core journey runs end to end on the API: institute → class → teacher → student enrolled → session → attendance recorded → parent sees attendance.
+
+  | § | Endpoint |
+  |---|---|
+  | §10.1 | `POST /classes/{uuid}/sessions` |
+  | §10.2 | `GET /classes/{uuid}/sessions` |
+  | §10.6 | `POST /sessions/{uuid}/cancel` |
+  | §10.3 | `POST /sessions/{uuid}/attendance` |
+  | §10.4 | `GET /sessions/{uuid}/attendance` |
+  | §10.5 | `GET /parents/me/children/{uuid}/attendance` |
+
+  §9.5 `active_enrollments` is now filled.
+- **Authorization (visibility first, D-026):**
+  - New `ClassPolicy::manageSessions`: the assigned teacher or an institute manager. Also new: `viewSessions`, `markAttendance` (assigned teacher, admins, active staff) and `viewAttendance`.
+  - `ClassSessionPolicy` (`cancel`, `markAttendance`, `viewAttendance`) applies them to the session's class.
+  - Callers who cannot see the class → `404`; visible but not allowed → `403`; suspended institute → `institute_suspended` for writes.
+  - The guardian view requires `TenantAccess::hasActiveGuardianLink`, re-read on every request, else `404`.
+- **Lock order (D-022/D-024):**
+  - Session create: `institutes` → `classes`.
+  - Cancel and mark: `institutes` → `classes` → `class_sessions` (by id).
+  - Enrolments and existing attendance are plain reads after the class lock. Attendance rows are corrected by primary key.
+  - All writes run in `Transactions::retrying()`. The session-slot unique key maps to `409 session_slot_taken` without the database error. Tested through the executed SQL, with re-authorization after an assignment ends.
+- **Rules settled here** (from the contract and D-024; reported for founder review):
+  1. **Sessions:** the class must be `active` (`409 not_active`), and `session_date` must be within the class dates (`422`). Times are `HH:MM`. `super_admin` and non-manager staff → `403`.
+  2. **Cancel:** `scheduled` only (`409 session_cancelled`); not with attendance (`409 session_has_attendance`, Q50); not for an archived class (`409 class_archived`).
+  3. **Attendance:**
+     - Future sessions → `409 session_in_future` (Q55 decided); cancelled sessions → `409 session_cancelled`; archived class → `409 class_archived`.
+     - Eligibility is `enrolled_on <= d < withdrawn_on` (Q48), with per-record `422`s.
+     - Upsert: new → `attendance.recorded` (one audit row per mark); changed → `attendance.corrected` with old and new `status`/`method` and `notes_changed` only (Q49); unchanged → nothing.
+     - `method` is required (`manual`); `notes` up to 500 characters.
+  4. **Attendance sheet (§10.4):** rows are the enrolments active on the date, plus enrolments already marked for the session. Not paginated. Readable while the institute is suspended. `super_admin` → `403` (not listed in the contract).
+  5. **Guardian view (§10.5):**
+     - The window defaults to the 30 days ending today; at most 366 days inclusive.
+     - Ordered newest first.
+     - Past attendance stays visible after a withdrawal (Q51).
+     - No notes or marker are shown to guardians.
+  6. **§9.5 `active_enrollments`:** enrolments with status `active` (future ones included), each with class and institute name.
+  7. **Carry-forward from D-026:** a class's date change must keep every non-cancelled session inside the new dates (`422`). Cancelled sessions do not hold the dates.
+  8. **New 409 reasons:** `session_slot_taken`, `session_cancelled`, `session_has_attendance`, `session_in_future`. **New events:** `session.created`, `session.cancelled`; `attendance.recorded` and `attendance.corrected` now have payloads.
+- **Review fixes (before commit):**
+  - **Notes preservation:**
+    - An omitted `notes` key keeps the stored note on a correction; an explicit `null` clears it; a string replaces it; a first mark without notes stores none.
+    - `AttendanceService::mark` builds the mark from the submitted keys only, so a correction compares only status, method and submitted notes. If none changed, the row is not updated: `marked_by`/`marked_at` never change on their own.
+  - **Session list privacy:**
+    - `ClassPolicy::viewSessions` allows only super_admin, the assigned teacher (active assignment) and the institute's admins and active staff. It never uses the public catalogue rule: a publicly listed class does not expose its schedule.
+    - Any other signed-in caller gets `404`. An unauthenticated caller gets `401`, because the route is authenticated and contract §1.4 rule 1 puts `401` before any resource lookup. The brief asked for `404` there too; it was kept at `401` to stay within the contract and reported.
+- **Request limit:** an attendance submission holds 1–500 records (`422` beyond), each enrolment at most once.
+- **The core C1 backend journey is complete on the API:** institute → class → teacher → student enrolled → session → attendance recorded → parent sees attendance.
+- **Tests:** 37 new; `php artisan test` → **600 passed (7758 assertions)** on two consecutive runs (563 existing + 37):
+  - session create 9, list and cancel 6 (including the public-class schedule privacy test);
+  - mark attendance 9 (including notes semantics), attendance sheet 2, guardian attendance and children enrolments 5;
+  - lock order, re-authorization and the slot backstop 5;
+  - class dates and sessions 1.
+- **Open:** E4 (invoices, demo payments, commission; an invoice requires an active enrolment, D-026); real two-process concurrency (E2c); frontend wiring of the core journey.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.

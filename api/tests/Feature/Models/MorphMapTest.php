@@ -2,12 +2,17 @@
 
 namespace Tests\Feature\Models;
 
+use App\Models\Attendance;
+use App\Models\ClassEnrollment;
+use App\Models\ClassFeeVersion;
+use App\Models\ClassSession;
 use App\Models\GuardianInvitation;
 use App\Models\Institute;
 use App\Models\InstituteStaff;
 use App\Models\StudentGuardian;
 use App\Models\StudentProfile;
 use App\Models\TeacherAssignment;
+use App\Models\TuitionClass;
 use App\Models\UserRole;
 use Illuminate\Database\ClassMorphViolationException;
 use Illuminate\Database\Eloquent\Model;
@@ -28,6 +33,12 @@ class MorphMapTest extends TestCase
             'student_profile' => StudentProfile::class,
             'guardian_invitation' => GuardianInvitation::class,
             'student_guardian' => StudentGuardian::class,
+            // G5/G6 (D-024, VP-80).
+            'class' => TuitionClass::class,
+            'class_fee_version' => ClassFeeVersion::class,
+            'class_session' => ClassSession::class,
+            'class_enrollment' => ClassEnrollment::class,
+            'attendance' => Attendance::class,
         ];
 
         foreach ($expected as $alias => $class) {

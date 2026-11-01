@@ -25,6 +25,9 @@ trait InteractsWithSpa
             // The .env.example driver: sessions live in the (test) database, so a fresh session
             // store per request reads only what was persisted under the cookie's session ID.
             'session.driver' => 'database',
+            // Never run session garbage collection (default lottery 2/100): it adds a random
+            // DELETE query, which made query-log assertions nondeterministic.
+            'session.lottery' => [0, 100],
         ]);
     }
 

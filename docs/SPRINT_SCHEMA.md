@@ -1,6 +1,6 @@
 # TuitionHub — Sprint Schema (migration specification)
 
-**Status:** APPROVED (D-013) — Migration Specification. Part 1 covers groups **G1–G3** (`CLAUDE.md` source order, item 4). Part 2 (R2: `audit_logs` and G4) is approved separately under D-015. Approval is conditional on VP-1: these migrations run first only on the disposable `tuitionhub_test` database (D-013).
+**Status:** APPROVED (D-013) — Migration Specification. Part 1 covers groups **G1–G3** (`CLAUDE.md` source order, item 4). Part 2 (R2: `audit_logs` and G4) is approved separately under D-015, and Part 3 (R3: G5 classes and G6 attendance) under D-024. Approval is conditional on VP-1: these migrations run first only on the disposable `tuitionhub_test` database (D-013).
 **Prepared:** 2026-10-28, branch `sprint/day1-api-scaffold`. **Revision 2** (2026-10-28) applies the founders' direction on Q1–Q24.
 **Sources, highest first:** `docs/PRODUCT_DECISIONS.md` (C1–C8) → `docs/DECISION_LOG.md` approved entries (D-005, D-011, D-012) → `docs/API_CONTRACT.md` v0.2 → this file → `docs/reference/TuitionHub_Sprint_Schema_Draft.md` and `docs/reference/TuitionHub_ER_Schema.md` (historical).
 
@@ -811,10 +811,11 @@ Purpose: a single-use, expiring code that lets a guardian link to a student (C6;
   - `guardian_invitations_accepted_chk CHECK ((status = 'accepted' AND accepted_at IS NOT NULL AND accepted_by_user_id IS NOT NULL) OR (status <> 'accepted' AND accepted_at IS NULL AND accepted_by_user_id IS NULL))`.
   - `guardian_invitations_revoked_chk CHECK ((status = 'revoked' AND revoked_at IS NOT NULL AND revoked_by_user_id IS NOT NULL) OR (status <> 'revoked' AND revoked_at IS NULL AND revoked_by_user_id IS NULL))`.
   - `guardian_invitations_accept_before_expiry_chk CHECK (accepted_at IS NULL OR accepted_at <= expires_at)`.
+- **Lock order (corrected by D-022, D-1):** every write here follows Pattern I: lock the managing **institute** row first, then the **student** row, then the **invitation** row, each by primary key. Users rows are taken only with shared locks (foreign-key checks, audit rows, an explicit `FOR SHARE` re-check), never exclusively and never before the institute. **No range locking reads or range updates** on `guardian_invitations` or `student_guardians`: under REPEATABLE READ they lock index gaps, and two transactions for different students in the same gap can deadlock on their inserts. Sets of rows (for example the pending invitations for a student and phone) are found with a plain read taken after the institute lock (the institute lock serialises every writer of that institute's invitations and links, so the snapshot is current), then changed one row at a time by primary key. This replaces the earlier wording ("lock … the pending invitations with `SELECT … FOR UPDATE`"; "select the invitation by `code_hash` `FOR UPDATE`", then lock the student), which contradicted the student-first rule in G4.3.
 - **Application rules** (Decided where marked "contract"; otherwise PROPOSAL):
   1. **Create** (§9.1; staff or admin of the managing institute). Everything runs in one transaction, plus the audit row:
-     - Lock the student row and the pending invitations for (student, phone) with `SELECT … FOR UPDATE`.
-     - Mark any pending invitation whose `expires_at` has passed as `expired`, which clears its `pending_flag`.
+     - Lock the institute row, then the student row (`SELECT … FOR UPDATE` by primary key). Find the pending invitations for (student, phone) with a plain read.
+     - Mark any pending invitation whose `expires_at` has passed as `expired` (update by primary key), which clears its `pending_flag`.
      - If a non-expired pending invitation remains → `409` (contract).
      - Generate the code (Q29):
        - 8 characters drawn with a cryptographically secure source (`random_int`) from the alphabet `23456789ABCDEFGHJKMNPQRSTVWXYZ` (30 symbols; no `0 O 1 I L U`; about 39 bits).
@@ -828,21 +829,21 @@ Purpose: a single-use, expiring code that lets a guardian link to a student (C6;
      - **Normalise the code** (Q29):
        - Upper-case it and remove spaces and `-`.
        - If the result is not exactly 8 characters from the alphabet, return the generic `422` without querying.
-       - Otherwise compute the HMAC and select the invitation by `code_hash` `FOR UPDATE`.
+       - Otherwise compute the HMAC and find the invitation's id, student and institute by `code_hash` with a **plain read, before the transaction** (no lock).
      - Redemption is rate-limited (contract §9.2: proposed 5 attempts per user per 15 min; `429`).
+     - **Then lock, in this order:** the institute row, the student row, the invitation row (each by primary key), and finally the caller's and the inviter's users rows with a shared lock (`FOR SHARE`, in primary-key order). This serialises concurrent acceptances for the same student (Q25).
      - **Recheck under the lock:** status is `pending`, now < `expires_at`, the caller has `phone_verified_at` set, and the caller's phone equals `guardian_phone` (contract).
        - If the invitation has expired, it is marked `expired`.
        - Unknown, expired or used codes and phone mismatches all return one **generic `422`** (contract).
      - If an active link already exists for this student and guardian → `409` (contract; also the DB unique key).
-     - Create `guardian_profiles` if missing (contract).
-     - **Lock the student row** (`SELECT … FOR UPDATE`). This serialises concurrent acceptances for the same student (Q25).
+     - Create `guardian_profiles` if missing (contract). A concurrent first acceptance by the same user is resolved by `guardian_profiles_user_id_unique`, then a locking re-read by `user_id`.
      - Insert the `student_guardians` row with `linked_by_user_id` = **inviter**, `linked_at` = now, `invitation_id` (contract).
        - `is_primary = 1` if the student has **no active primary** link; otherwise `0` (Q25).
      - Set the invitation to `accepted` / `accepted_at` / `accepted_by_user_id`.
      - Audit `guardian_invitation.accepted` and `guardian_link.created` (contract).
      - Link creation and invitation consumption commit together or not at all.
      - In `log` mode, `phone_verified_at` is **not** real phone verification (C6).
-  3. **Revoke** (§9.3): lock the row. Only `pending` → `revoked`, setting `revoked_at`/`revoked_by_user_id`; otherwise `409` (contract). Audited.
+  3. **Revoke** (§9.3): lock the institute row, the student row, then the invitation row (by primary key). Only `pending` → `revoked`, setting `revoked_at`/`revoked_by_user_id`; otherwise `409` (contract). Audited.
   4. **Never log the plaintext code.** The accept request body and the create response are excluded from logs, audit rows and exception reports (contract §1.1).
   5. **HMAC key** (Q29):
      - `GUARDIAN_INVITE_HMAC_KEY` is a dedicated secret (32 random bytes, base64), read through config and kept only in local, ignored `.env` files. It is never committed, printed or logged; `.env.example` holds an empty placeholder.
@@ -906,13 +907,13 @@ Purpose: the guardian→student link. An **active** row (`revoked_at IS NULL`) i
   - **Re-linking always creates a new row** through a new invitation. Revoked rows stay as history.
   - This replaces the draft's unique `(student_id, guardian_id)` with reactivation, which would overwrite revocation history.
   - **Revoke** (§9.4; institute admin or `super_admin`). Everything runs in one transaction:
-    - **Lock the student row first** (`SELECT … FOR UPDATE`), then the link row.
+    - **Lock the institute row, then the student row** (`SELECT … FOR UPDATE`), then the link row by primary key (found with a plain read after the locks; D-022).
     - Set `revoked_at` = now and `revoked_by_user_id`, which clears `active_flag` and `primary_flag`.
     - Promote a new primary if needed (below).
     - Audit `guardian_link.revoked`.
   - **Access** is checked against an active row on **every request** (contract §3, §9.4: "lost immediately"). Nothing is cached in the session.
   - **Primary guardian** (Q25, approved D-015; contract v0.3 §9.2, §9.4):
-    - **The student row is locked** (`SELECT … FOR UPDATE`, taken before any link row) for **every** primary-guardian creation, revocation and promotion. The student row is always locked first, so concurrent operations on the same student run one at a time and cannot deadlock.
+    - **The student row is locked** (`SELECT … FOR UPDATE`, taken before any link row) for **every** primary-guardian creation, revocation and promotion, right after the managing institute's row (D-022 Pattern I). Institute, then student, is always the first pair of locks, so concurrent operations on the same student run one at a time and cannot deadlock.
     - **First active guardian becomes primary.** On acceptance, with the student row locked, the new link gets `is_primary = 1` if the student has no active primary. `guardian_link.created` then records old primary link ID `null` and the new link's ID (Q37).
     - **Promotion on revocation:**
       - When the primary link is revoked, the same transaction (student row locked) first sets `revoked_at`, which frees `primary_flag`.
@@ -1001,3 +1002,391 @@ All items were approved by Ranithu Shenal on 2026-10-28 (D-015). The two pre-lau
 | — | Audit IP retention period | Pre-launch privacy review | **Unresolved (pre-launch)** |
 | — | Real-money guardian billing policy | Separate pre-launch review; Q36 covers the demo only | **Unresolved (pre-launch)** |
 | — | AuditLogger handling of an invalid or missing IP | No request → NULL, no warning. Missing or invalid from a request → NULL plus a warning without the raw value. The business transaction never fails (R2.0 rule 9) | **Approved (D-017)** |
+
+---
+
+# Part 3 — R3: G5 Classes and G6 Attendance (DRAFT)
+
+**Status:** **APPROVED (D-024) by TuitionHub founders on 2026-11-01. Migrated: M3 verified on `tuitionhub_test` (D-025) and applied to the development database `tuitionhub` on 2026-11-01 (batch 3).** Prepared 2026-11-01 on `sprint/day1-api-scaffold` (baseline `ca3d8a9`).
+
+- **Sources, highest first:**
+  - contract v0.7: §7 classes, §8.3–§8.4 enrolments, §10 sessions and attendance, §11.2 fee selection, §13 audit;
+  - D-022/D-023 (lock order);
+  - the R3 brief (2026-11-01);
+  - the "R1 design notes — not yet approved" in `DECISION_LOG.md`, which are proposals only;
+  - the sprint draft §3.12–§3.19 and the ER schema, both historical.
+- **Labels:** as in Part 1. **PROPOSAL (R3 brief)** and **PROPOSAL** record where each item came from. **Every item in Part 3, and Q38–Q56, is approved by D-024.**
+- **Conventions:** §0 applies unchanged.
+  - UTC `DATETIME` instants; `DATE` and `TIME` in `Asia/Colombo`.
+  - `VARCHAR(32)` plus a `CHECK` for vocabularies, with server-canonicalised spelling (§0.1).
+  - `ON DELETE RESTRICT`, `ON UPDATE` unset, no `CASCADE`/`SET NULL`.
+  - Explicit constraint names.
+  - **No soft deletes** (§0.8). Classes are retired with `status = archived`; no G5/G6 row is ever deleted by the application.
+- **Not built** (D-012, contract §2.3): `classes.hall_id` and `slug`; `class_enrollments.qr_token` and `student_card_no`; `class_sessions.substitute_teacher_id` (F4), `cancellation_reason` and `online_meeting_*`; `attendances.device_id`; every `deleted_at`.
+
+### Contradictions found between the sources (each resolved by D-024 below)
+
+| # | Point | Sources disagree | Part 3 uses |
+|---|---|---|---|
+| X1 | Enrolment start | The R3 brief says `enrolled_at`; contract §8.3 and the draft say `enrolled_on` (a date) | `enrolled_on DATE`, following the contract (Q38) |
+| X2 | Cancelled session slot | Contract §10.1: duplicate (class, date, start time) → `409`. The R1 note says that as written, a cancelled session does **not** free its slot. The brief makes the slot unique among non-cancelled sessions only | The brief's rule; contract §10.1 needs a clarifying note (Q39) |
+| X3 | `max_students` | Draft: nullable, NULL meaning no cap. Contract: ≥ 1. Brief: NOT NULL | `NOT NULL`, `CHECK ≥ 1` |
+| X4 | Fee amount | Draft: ≥ 0. Contract §7.1: > 0 | `CHECK > 0` |
+| X5 | Fee immutability | Brief and draft: immutable. Contract §7.4 closes the previous version's `effective_to` | Everything is immutable except `effective_to`, which may be set once, from NULL (Q43) |
+| X6 | Status vocabularies | Draft enrolment: `active\|paused\|withdrawn\|completed`; draft session: `scheduled\|in_progress\|conducted\|cancelled\|rescheduled`. The contract names only `active`/`withdrawn_on` and `scheduled`/`cancelled` | `active\|withdrawn` and `scheduled\|cancelled` (Q40) |
+| X7 | Missing endpoints | §10.3 refuses attendance on cancelled sessions, and §8.3/§11.2 depend on an enrolment being active, but no endpoint cancels a session or withdraws an enrolment | The schema supports both; the endpoints are proposed for E3 in contract v0.7.1 §8.5 and §10.6 (Q41) |
+
+## G5 — Classes
+
+### G5.1 `classes`
+
+Purpose: a class an institute runs, with one assigned teacher (contract §3, §7).
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (§0.3) |
+| `institute_id` | BIGINT UNSIGNED | No | — | FK `institutes.id`; from the route, never changes | Decided (contract §7.1) |
+| `teacher_id` | BIGINT UNSIGNED | No | — | FK `teacher_profiles.id`; must have an **active assignment** at `institute_id` (service rule) | Decided (contract §3, §7.1) |
+| `subject_id`, `grade_id`, `exam_target_id`, `medium_id`, `syllabus_id` | BIGINT UNSIGNED | No | — | FKs to the G1 lookups; from exact codes (D-021) | Decided (contract §7.1) |
+| `stream_id` | BIGINT UNSIGNED | Yes | NULL | FK `streams.id` | Decided (contract §7.1) |
+| `title` | VARCHAR(255) | No | — | free-text rules §1.6 | Decided (contract §7); type PROPOSAL (draft) |
+| `description` | TEXT | Yes | NULL | multi-line free text §1.6 | Decided (contract §7) |
+| `mode` | VARCHAR(32) | No | — | `in_person\|online\|hybrid` | Decided (contract §7.1) |
+| `max_students` | INT UNSIGNED | No | — | `≥ 1` | Decided `≥ 1` (contract); NOT NULL PROPOSAL (R3 brief) |
+| `starts_on` | DATE | No | — | | Decided (contract §7.1) |
+| `ends_on` | DATE | Yes | NULL | `≥ starts_on` | Decided nullable (contract); CHECK PROPOSAL (R3 brief) |
+| `status` | VARCHAR(32) | No | `'draft'` | `draft\|active\|archived` | Decided (contract §7.1, §7.4) |
+| `public_listing` | BOOLEAN (TINYINT(1)) | No | `0` | public only when `active` and the institute is active (§7.5) | Decided (contract §7.5); default PROPOSAL (R3 brief, draft) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `classes_uuid_unique (uuid)`.
+  - `classes_id_institute_unique (id, institute_id)`. PROPOSAL (R3 brief): the parent key for the enrolment composite FK.
+- **Indexes** (PROPOSAL):
+  - `classes_institute_status_index (institute_id, status)`: §7.2 lists; also serves the institute FK.
+  - `classes_teacher_status_index (teacher_id, status)`: teacher views; also serves the teacher FK.
+  - `classes_catalogue_index (status, public_listing, subject_id, grade_id)`: §7.5.
+  - The other lookup FK indexes are created automatically.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `classes_institute_fk`, `classes_teacher_fk`.
+  - `classes_subject_fk`, `classes_grade_fk`, `classes_stream_fk`, `classes_exam_target_fk`, `classes_medium_fk`, `classes_syllabus_fk`.
+- **CHECKs** (PROPOSAL):
+  - `classes_status_chk CHECK (status IN ('draft','active','archived'))`.
+  - `classes_mode_chk CHECK (mode IN ('in_person','online','hybrid'))`.
+  - `classes_max_students_chk CHECK (max_students >= 1)`.
+  - `classes_dates_chk CHECK (ends_on IS NULL OR ends_on >= starts_on)`.
+  - `classes_public_listing_chk CHECK (public_listing IN (0, 1))`.
+- **Not a database rule:** that the teacher's assignment is active. `teacher_institute` has no unique key on (teacher, institute), because history rows exist, so there is nothing for an FK to reference.
+- **Application rules** (Decided where marked "contract"; otherwise PROPOSAL):
+  1. **Create** (§7.1). Everything runs in one transaction, plus the audit rows:
+     - Lock the institute, then re-authorize (owner or admin; a suspended institute → `403 institute_suspended`).
+     - Check, with plain reads after the lock (every writer of `teacher_institute` holds the institute lock), that the teacher has an active assignment there (contract).
+     - Lookup codes must match exactly. `status` must be `draft` or `active` (contract). Check the date rule.
+     - Insert the class and its first fee version (G5.2). Audit `class.created` and `fee.version_created` (contract).
+  2. **Update** (§7.4): lock the institute, then the class, and re-authorize.
+     - A new teacher needs an active assignment.
+     - `max_students` below the active enrolment count (counted under the class lock) → `409` (contract).
+     - A fee change follows G5.2. Status transitions are an open question (Q46).
+  3. **Teacher access** to class data also needs that teacher's assignment to still be active (contract §3). An ended assignment does not change `teacher_id`; the class keeps it until §7.4 reassigns it.
+
+### G5.2 `class_fee_versions`
+
+Purpose: the fee history of a class (contract §7.1, §7.4, §11.2). Invoices snapshot the amount, so changing a fee never changes an issued invoice.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `class_id` | BIGINT UNSIGNED | No | — | FK `classes.id` | Decided (draft, contract) |
+| `amount` | DECIMAL(15,2) | No | — | `> 0`; institute tuition only, without the platform fee | Decided (contract §7.1, §11.1) |
+| `currency` | CHAR(3) | No | `'LKR'` | `'LKR'` only | Decided (contract §1.5) |
+| `billing_cycle` | VARCHAR(32) | No | — | `monthly\|term\|one_time` | Decided (contract §7.1) |
+| `effective_from` | DATE | No | — | | Decided (contract §7.1) |
+| `effective_to` | DATE | Yes | NULL | NULL while current; set **once** when the next version is created | Decided (contract §7.4) |
+| `current_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(effective_to IS NULL, 1, NULL)` | PROPOSAL (R3 brief) |
+| `created_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; from the session | Decided (contract §7.1) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | `updated_at` changes only when `effective_to` is closed | PROPOSAL (§0.6) |
+
+- **No `uuid`:** a fee version is never addressed by any route (Q43).
+- **Unique:**
+  - `class_fee_versions_current_unique (class_id, current_flag)`: at most one open version per class (R3 brief).
+  - `class_fee_versions_class_from_unique (class_id, effective_from)` (R1 note).
+- **FKs:** `class_fee_versions_class_fk`, `class_fee_versions_created_by_fk`.
+- **CHECKs** (PROPOSAL):
+  - `class_fee_versions_amount_chk CHECK (amount > 0)`.
+  - `class_fee_versions_currency_chk CHECK (currency = 'LKR')`.
+  - `class_fee_versions_cycle_chk CHECK (billing_cycle IN ('monthly','term','one_time'))`.
+  - `class_fee_versions_dates_chk CHECK (effective_to IS NULL OR effective_to >= effective_from)`.
+- **Application rules:**
+  1. **Append-only** (contract §7.4). `amount`, `currency`, `billing_cycle`, `effective_from` and `created_by_user_id` never change. `effective_to` changes once, from NULL to a date. The model refuses any other change before a query runs, in the style of `GuardsGeneratedColumns` (PROPOSAL).
+  2. **New version, under the class lock:**
+     - A plain read finds the open version.
+     - The new `effective_from` must be after the open version's `effective_from` (contract), otherwise `422`.
+     - The open version's `effective_to` is set to the day before, by primary key, and the new version is inserted with `effective_to = NULL`.
+     - So versions are contiguous and never overlap. The database enforces one open version and distinct start dates; non-overlap is a service rule and is tested (VP-76).
+  3. **Fee for a date `d`** (invoice `issued_on`, §11.2): `effective_from <= d AND (effective_to IS NULL OR effective_to >= d)`. This matches at most one row. Before the first version's start → `422` (contract).
+  4. **`current_fee` in the `Class` shape:** the version in force today (`Asia/Colombo`), or, before any is in force, the earliest future one (Q54).
+
+### G5.3 `class_enrollments`
+
+Purpose: a student's place in a class (contract §8.3). History is kept: a withdrawal never deletes or reactivates a row.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §8.3) |
+| `class_id` | BIGINT UNSIGNED | No | — | part of both composite FKs' tenant check | Decided (draft, contract) |
+| `student_id` | BIGINT UNSIGNED | No | — | | Decided (draft, contract) |
+| `institute_id` | BIGINT UNSIGNED | No | — | must equal the class's institute **and** the student's managing institute (two composite FKs) | **PROPOSAL (R3 brief)**: new column, tenant invariant |
+| `status` | VARCHAR(32) | No | `'active'` | `active\|withdrawn` | Decided `active` (contract §8.3); values PROPOSAL (Q40) |
+| `enrolled_on` | DATE | No | — | | Decided (contract §8.3; X1) |
+| `withdrawn_on` | DATE | Yes | NULL | set together with `withdrawn` | Decided (contract §8.3) |
+| `active_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status = 'active', 1, NULL)` | Decided pattern (§0.9); **R3 brief**: keyed on `status`, so every historical row is NULL |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `class_enrollments_uuid_unique (uuid)`.
+  - `class_enrollments_active_unique (class_id, student_id, active_flag)`: **one active enrolment** per class and student; any number of withdrawn ones (R3 brief).
+  - `class_enrollments_id_class_unique (id, class_id)`. PROPOSAL (R3 brief): the parent key for the attendance composite FK.
+- **Indexes:**
+  - `class_enrollments_class_institute_index (class_id, institute_id)` and `class_enrollments_student_institute_index (student_id, institute_id)`.
+  - These are the named child indexes for the two composite FKs, as in G4.2. The second also serves "a student's enrolments".
+- **FKs** (both `ON DELETE RESTRICT`; no separate single-column FKs, as in G4.2, because both composites are NOT NULL):
+  - `class_enrollments_class_institute_fk (class_id, institute_id) → classes(id, institute_id)`, parent `classes_id_institute_unique`.
+  - `class_enrollments_student_institute_fk (student_id, institute_id) → student_profiles(id, managing_institute_id)`, parent `student_profiles_id_institute_unique`, which already exists (G4.1).
+  - **Effect:** an enrolment whose class and student belong to different institutes cannot exist (VP-60).
+  - **Consequence:** a student's `managing_institute_id` and a class's `institute_id` cannot change while enrolments exist (`ON UPDATE NO ACTION`). That matches the G4.1 transfer limitation.
+- **CHECKs** (PROPOSAL):
+  - `class_enrollments_status_chk CHECK (status IN ('active','withdrawn'))`.
+  - `class_enrollments_withdrawal_chk CHECK ((status = 'active' AND withdrawn_on IS NULL) OR (status = 'withdrawn' AND withdrawn_on IS NOT NULL))`.
+  - `class_enrollments_dates_chk CHECK (withdrawn_on IS NULL OR withdrawn_on >= enrolled_on)`.
+- **Application rules:**
+  1. **Create** (§8.3): lock the institute, then the class; re-authorize (same-institute staff or admin; suspended → `403`).
+     - The class must be `active` (contract).
+     - The student must be managed by the same institute; otherwise `404` (contract), with the composite FK as backstop.
+     - Active count `≥ max_students` → `409` (contract). An existing active enrolment → `409` (contract); the unique key is the backstop and is mapped **without chaining** the database error (D-022).
+     - **`enrolled_on`** (D-024): may be in the future, but must be `>= classes.starts_on` and, when the class has one, `<= classes.ends_on`; otherwise `422`.
+     - Audited `enrollment.created` (contract).
+  2. **Withdraw** (proposed E3 endpoint, contract v0.7.1 §8.5; Q41): status `withdrawn` and `withdrawn_on`, under the institute and class locks. **Re-enrolling creates a new row**, which the unique key allows once the old row is withdrawn (VP-63, VP-64).
+     - **Withdrawal date safeguard** (D-024): a requested withdrawal date **before** `enrolled_on` is stored as `withdrawn_on = enrolled_on`. That is a zero-length enrolment: it was never active on any date (rule 3), and `class_enrollments_dates_chk` still holds (VP-81).
+     - **Attendance safeguard** (D-024): a withdrawal date that would leave existing attendance outside the enrolment's active period, i.e. any attendance row whose session date is `>= withdrawn_on`, is refused with `409`. Attendance history is never invalidated (VP-82).
+  3. **Active on date `d`** (attendance, §10.3): `enrolled_on <= d AND (withdrawn_on IS NULL OR d < withdrawn_on)`. `withdrawn_on` is the first day not enrolled (Q48).
+
+### G5.4 `class_sessions`
+
+Purpose: one dated occurrence of a class (contract §10.1). There is no recurring generation in the sprint.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §10) |
+| `class_id` | BIGINT UNSIGNED | No | — | FK `classes.id` | Decided (contract §10.1) |
+| `session_date` | DATE | No | — | `Asia/Colombo` date | Decided (contract §10.1) |
+| `start_time`, `end_time` | TIME | No | — | `Asia/Colombo`; `end_time > start_time`; whole minutes (Q45) | Decided (contract §10.1) |
+| `status` | VARCHAR(32) | No | `'scheduled'` | `scheduled\|cancelled` | Decided values (contract §10); vocabulary PROPOSAL (Q40) |
+| `slot_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status <> 'cancelled', 1, NULL)` | **PROPOSAL (R3 brief)**; X2, Q39 |
+| `created_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; from the session | PROPOSAL (draft) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `class_sessions_uuid_unique (uuid)`.
+  - `class_sessions_slot_unique (class_id, session_date, start_time, slot_flag)`: one **non-cancelled** session per class, date and start time. Cancelled sessions keep their row and free the slot (R3 brief).
+  - `class_sessions_id_class_unique (id, class_id)`. PROPOSAL (R3 brief): the parent key for the attendance composite FK.
+- **Indexes:** the class FK is served by the slot unique key, which leads with `class_id`.
+- **FKs:** `class_sessions_class_fk`, `class_sessions_created_by_fk`.
+- **CHECKs** (PROPOSAL):
+  - `class_sessions_status_chk CHECK (status IN ('scheduled','cancelled'))`.
+  - `class_sessions_times_chk CHECK (end_time > start_time)`.
+  - `class_sessions_minutes_chk CHECK (SECOND(start_time) = 0 AND SECOND(end_time) = 0)` (Q45).
+  - Sessions cannot cross midnight.
+- **Application rules:**
+  1. **Create** (§10.1): lock the institute, then the class; re-authorize (the assigned teacher with an active assignment, or an institute manager; suspended → `403`).
+     - A duplicate non-cancelled slot → `409` (contract), mapped without chaining.
+     - Overlapping sessions with different start times are allowed; the contract checks only the start time.
+     - Class status and date-range rules: Q47.
+  2. **Cancel** (proposed E3 endpoint, contract v0.7.1 §10.6; Q41): `scheduled` → `cancelled` once, freeing the slot. The row is never deleted. A session that already has attendance cannot be cancelled (`409`, Q50).
+
+## G6 — Attendance
+
+### G6.1 `attendances`
+
+Purpose: one attendance mark per session and enrolment (contract §2.3, §10.3).
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `session_id` | BIGINT UNSIGNED | No | — | | Decided (contract, draft) |
+| `enrollment_id` | BIGINT UNSIGNED | No | — | | Decided (contract, draft) |
+| `class_id` | BIGINT UNSIGNED | No | — | must be both the session's and the enrolment's class (two composite FKs) | **PROPOSAL (R3 brief)**: new column, cross-class invariant |
+| `status` | VARCHAR(32) | No | — | `present\|absent\|late\|excused` | Decided (contract §10.3) |
+| `method` | VARCHAR(32) | No | `'manual'` | `manual` only in the sprint | Decided (D-012, contract) |
+| `notes` | VARCHAR(500) | Yes | NULL | free text §1.6 | Decided field (contract §10.3); length PROPOSAL (Q44) |
+| `marked_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; from the session, never the request | Decided (contract §10.3) |
+| `marked_at` | DATETIME | No | — | UTC; set on insert and on every correction | Decided (contract §10.3) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **No `uuid`:** attendance is addressed by session and enrolment UUIDs (contract §10.3–§10.5).
+- **Unique:** `attendances_session_enrollment_unique (session_id, enrollment_id)` (contract §1.6, §10.3).
+- **Indexes:**
+  - `attendances_session_class_index (session_id, class_id)` and `attendances_enrollment_class_index (enrollment_id, class_id)`: the child indexes for the composite FKs. The unique key does not qualify for the session FK: its second column is `enrollment_id`.
+  - The enrolment index also serves §10.5 (a child's attendance).
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `attendances_session_class_fk (session_id, class_id) → class_sessions(id, class_id)`, parent `class_sessions_id_class_unique`.
+  - `attendances_enrollment_class_fk (enrollment_id, class_id) → class_enrollments(id, class_id)`, parent `class_enrollments_id_class_unique`.
+  - `attendances_marked_by_fk (marked_by_user_id) → users(id)`.
+  - **Effect:** an attendance row whose session and enrolment belong to different classes cannot exist (VP-61). Sessions and enrolments that have attendance cannot be deleted, so the history is kept (VP-67, VP-70).
+- **CHECKs** (PROPOSAL):
+  - `attendances_status_chk CHECK (status IN ('present','absent','late','excused'))`.
+  - `attendances_method_chk CHECK (method IN ('manual'))`.
+- **Application rules** (§10.3):
+  1. **Marking:** lock the institute → the class → the session (by primary key); re-authorize.
+     - Who may mark: the assigned teacher with an active assignment, or same-institute staff/admin. A suspended institute → `403`.
+     - A cancelled session → `409` (contract); a session after today in `Asia/Colombo` → `409` (contract "proposed", Q55).
+  2. **Enrolment eligibility:** a plain read, after the class lock, of the enrolments named in the request. Every enrolment writer holds the class lock, so the read is current.
+     - Each must belong to the session's class, with the composite FK as backstop, and be **active on `session_date`** (G5.3 rule 3), otherwise `422` (contract).
+     - A withdrawn enrolment can still be corrected for sessions before `withdrawn_on`.
+  3. **Upsert:**
+     - A plain read finds the existing rows for the session and those enrolments.
+     - A new row is inserted; a changed row is updated by primary key. That update is a **correction**: new `marked_at` and `marked_by_user_id`, audited `attendance.corrected` with the old and new values (contract).
+     - An unchanged row writes nothing (§1.6). Duplicates in one request → `422` (contract).
+     - Audit payload granularity, and whether `notes` text is recorded or only `notes_changed`: Q49.
+  4. **History:** withdrawing, archiving or cancelling never deletes attendance (RESTRICT, no delete path).
+
+## G5/G6 lock order
+
+Extends D-022 (Option A, Pattern I) and D-023:
+
+```
+1 otp_challenges
+2 users                EXCLUSIVE — self-scoped transactions only (Pattern U)
+3 institutes           EXCLUSIVE by primary key — first lock of every institute-scoped write
+4a student_profiles → guardian_invitations → guardian_profiles → student_guardians      (E2)
+4b classes → class_fee_versions → class_sessions → class_enrollments → attendances    (G5/G6)
+   (institute_staff / teacher_institute / user_roles also sit at level 4, as before)
+8 users                SHARED only (FK checks, audit rows, explicit FOR SHARE re-checks)
+9 audit_logs           insert
+```
+
+- **Fixed order:** sessions come **before** enrolments. Attendance marking is the only path that needs both, and it needs the session's state first. No path locks an enrolment and then waits for a session.
+- **Every row is locked by primary key.** Sets of rows (open fee version, active enrolments, existing attendance, active count) are found with **plain reads after the class lock**. Every writer of those rows holds the same institute and class locks, so the snapshot is current, and nothing locks a range.
+- **G5/G6 never takes an explicit lock on `student_profiles`.** An enrolment insert takes an implicit shared lock on the student row (FK check) *after* the class lock. Every E2 writer of that row holds the same institute lock first, so the two never wait on each other.
+- **Lookup rows** (implicit shared locks from the class FKs) have no writers.
+- **`teacher_profiles`** gets an implicit shared lock from the class insert or teacher change. `TeacherProfileService` holds it exclusively and then waits only for a shared `users` lock (D-022 C-1 fix), which never closes a cycle.
+
+| Write | Explicit locks, in order | Implicit shared locks | Plain reads after the class lock |
+|---|---|---|---|
+| Class create | `institutes` | `institutes` (held), `teacher_profiles`, lookups, `users` (actor, audit); fee insert: `classes` (new) | active teacher assignment |
+| Class update / fee change | `institutes` → `classes` | as create; fee: `classes` (held), `users` | active count; open fee version |
+| Enrolment create | `institutes` → `classes` | `classes` (held), `student_profiles`, `users` (audit) | student's institute; active count; existing active enrolment |
+| Enrolment withdraw (Q41) | `institutes` → `classes` → `class_enrollments` | `users` (audit) | — |
+| Session create | `institutes` → `classes` | `classes` (held), `users` | duplicate slot |
+| Session cancel (Q41) | `institutes` → `classes` → `class_sessions` | `users` | attendance present (Q50) |
+| Attendance mark | `institutes` → `classes` → `class_sessions` | `class_enrollments`, `class_sessions` (held), `users` | enrolments named; existing attendance |
+
+- **All of these** use `Transactions::retrying()`, with nested calls propagating (D-022). Unique-key backstops are mapped to `409` without chaining the database error.
+- **Throughput trade-off (Q56):** the institute lock serialises every write in one institute, including attendance marking. That is acceptable for the demo sprint; locking only the class would need its own review against Pattern I.
+
+## R3 migration order (M3)
+
+Appended after `2026_10_29_000013` (append-only, D-014). Every FK points to an earlier table, and there are no cycles or deferred FKs.
+
+| # | Migration | Creates | FKs to |
+|---|---|---|---|
+| 16 | `2026_10_29_000014_create_classes_table.php` | `classes` (+ `(id, institute_id)` unique, CHECKs) | `institutes`, `teacher_profiles`, `subjects`, `grades`, `streams`, `exam_targets`, `mediums`, `syllabi` |
+| 17 | `2026_10_29_000015_create_class_fee_versions_table.php` | `class_fee_versions` (+ `current_flag`, CHECKs) | `classes`, `users` |
+| 18 | `2026_10_29_000016_create_class_sessions_table.php` | `class_sessions` (+ `slot_flag`, `(id, class_id)` unique, CHECKs) | `classes`, `users` |
+| 19 | `2026_10_29_000017_create_class_enrollments_table.php` | `class_enrollments` (+ `active_flag`, `(id, class_id)` unique, CHECKs) | `classes` (composite), `student_profiles` (composite) |
+| 20 | `2026_10_29_000018_create_attendances_table.php` | `attendances` (+ CHECKs) | `class_sessions` (composite), `class_enrollments` (composite), `users` |
+
+**Composite FK parent keys**, verified against §0.C-4: the parent has a **unique** index whose first columns are the referenced columns, in the same order, with identical `BIGINT UNSIGNED` types.
+
+| Child FK | Parent unique key | Exists? | Named child index |
+|---|---|---|---|
+| `class_enrollments (class_id, institute_id)` | `classes_id_institute_unique (id, institute_id)` | created in #16 | `class_enrollments_class_institute_index` |
+| `class_enrollments (student_id, institute_id)` | `student_profiles_id_institute_unique (id, managing_institute_id)` | **yes** (G4.1, applied) | `class_enrollments_student_institute_index` |
+| `attendances (session_id, class_id)` | `class_sessions_id_class_unique (id, class_id)` | created in #18 | `attendances_session_class_index` |
+| `attendances (enrollment_id, class_id)` | `class_enrollments_id_class_unique (id, class_id)` | created in #19 | `attendances_enrollment_class_index` |
+
+- **No `CASCADE`, `SET NULL` or `SET DEFAULT` anywhere.** The generated columns use `status` (enrolments, sessions) and `effective_to` (fee versions), none of which has an FK (§0.C-3). No CHECK uses an FK column (§0.C-2).
+- `down()` drops each table. Rolling back M3 drops the five tables in reverse order and does not touch G1–G4.
+- **The first run goes only to `tuitionhub_test`,** through the normal suite (`RefreshDatabase`). Applying M3 to `tuitionhub` needs its own approval, as for R2 (D-016).
+
+## R3 validation plan (VP-60 onward; to run in M3, not executed)
+
+"DB" cases are direct inserts asserting the MySQL error code and the constraint name. "Model" and "Service" cases need the models or the later E3 services.
+
+| ID | Kind | Test | Expected |
+|---|---|---|---|
+| VP-60 | DB | **Cross-tenant enrolment:** class at institute A, student at B. Insert with `institute_id = A`, then with `= B` | 1452 `class_enrollments_student_institute_fk`; 1452 `class_enrollments_class_institute_fk` |
+| VP-61 | DB | **Cross-class attendance:** session of class X, enrolment of class Y. Insert with `class_id = X`, then `= Y`, then a third class | 1452 on `attendances_enrollment_class_fk`, then on `attendances_session_class_fk`, then 1452 |
+| VP-62 | DB | **Duplicate active enrolment** for the same class and student | 1062 `class_enrollments_active_unique` |
+| VP-63 | DB | **Multiple historical withdrawals:** three `withdrawn` rows plus one `active` row for the same class and student | All accepted |
+| VP-64 | DB + Service | **Re-enrolment** after withdrawal | A new row with a new UUID; the old row unchanged |
+| VP-65 | DB | **Invalid capacity:** `max_students` 0, then NULL | 3819 `classes_max_students_chk`; 1048 |
+| VP-66 | DB | **Duplicate session:** a second `scheduled` session in the same (class, date, start time); then cancel the first and insert again; then two cancelled sessions in one slot | 1062 `class_sessions_slot_unique`; afterwards accepted; accepted |
+| VP-67 | DB | **Cancelled-session history:** a cancelled session with attendance; try to delete the session and the class | 1451 `attendances_session_class_fk` and `class_sessions_class_fk`; rows unchanged |
+| VP-68 | DB | **Two current fee versions** for one class; then two versions with the same `effective_from` | 1062 `class_fee_versions_current_unique`; 1062 `class_fee_versions_class_from_unique` |
+| VP-69 | DB | **Duplicate attendance** for a session and enrolment | 1062 `attendances_session_enrollment_unique` |
+| VP-70 | DB + Service | **Historical attendance after withdrawal:** mark, then withdraw the enrolment, then try to delete it | Attendance rows still present; 1451 `attendances_enrollment_class_fk` |
+| VP-71 | DB | **CHECK violations:** class status `open`, mode `remote`, `ends_on < starts_on`; fee amount `0`/`-1`, currency `USD`, cycle `weekly`, `effective_to < effective_from`; enrolment status `paused`, `withdrawn` without `withdrawn_on`, `active` with it, `withdrawn_on < enrolled_on`; session `end_time <= start_time`, status `done`, `15:30:20`; attendance status `sick`, method `qr` | 3819, each naming its CHECK |
+| VP-72 | DB + Model | Writing `current_flag`, `active_flag` or `slot_flag` directly | 3105; the model refuses before any query (`LogicException`) |
+| VP-73 | DB | **Parent protection:** delete an institute with classes, a teacher profile with classes, a used lookup row, a class with fee versions, enrolments or sessions, a user referenced as creator or marker | 1451, each with the named FK |
+| VP-74 | DB | **Parent existence:** a class with an unknown teacher or lookup; an enrolment for an unknown class or student; attendance for an unknown session or enrolment | 1452, each with the named FK |
+| VP-75 | Model | **Fee immutability:** change `amount`, `currency`, `billing_cycle` or `effective_from` of a stored version; set `effective_to` on a closed version | `LogicException`; the database is unchanged |
+| VP-76 | Service (E3) | **No overlapping fee versions:** a new version on or before the open version's `effective_from` → `422`; a valid one closes the previous version the day before; every date matches at most one version | As described |
+| VP-77 | Service (E3) | **Capacity:** enrolling into a full class → `409`; lowering `max_students` below the active count → `409` | As described |
+| VP-78 | Service (E3) | **Active on date:** attendance for a session before `enrolled_on`, or on/after `withdrawn_on` → `422`; before `withdrawn_on` → accepted | As described |
+| VP-79 | Structure | Column types (`DATE`/`TIME`/`DATETIME`, `DECIMAL(15,2)`), no `deleted_at`, generated expressions, every named index, FK rules `RESTRICT`, migration order | As specified |
+| VP-80 | Model | Morph aliases `class`, `class_fee_version`, `class_enrollment`, `class_session`, `attendance`; public UUIDs on classes, enrolments and sessions only; no internal ids serialized | As described |
+| VP-81 | DB + Service (E3) | **Zero-length enrolment:** withdrawal requested before `enrolled_on`. DB: `withdrawn_on = enrolled_on` is accepted | Stored as `withdrawn_on = enrolled_on`; active on no date |
+| VP-82 | Service (E3) | **Attendance safeguard:** withdrawal dated on or before the date of a session that already has attendance for the enrolment | `409`; the enrolment and attendance unchanged |
+| VP-83 | Service (E3) | **Future enrolment within class dates:** `enrolled_on` after today but within `starts_on`–`ends_on` → `201`; before `starts_on` or after `ends_on` → `422` | As described |
+
+## R3 decisions (D-024)
+
+All items were approved by the TuitionHub founders on 2026-11-01 (D-024).
+
+| # | Topic | Decision | Status |
+|---|---|---|---|
+| Q38 | X1: `enrolled_at` (brief) vs `enrolled_on` (contract) | `enrolled_on DATE`, as in the contract | **Decided (D-024)** |
+| Q39 | X2: may a cancelled session free its slot? | Yes; contract v0.7.1 §10.1 | **Decided (D-024)** |
+| Q40 | X6: status vocabularies | Enrolments `active\|withdrawn`; sessions `scheduled\|cancelled` | **Decided (D-024)** |
+| Q41 | X7: withdrawing an enrolment and cancelling a session | Schema ready; endpoints proposed for E3 (contract v0.7.1 §8.5, §10.6), to be finalised in the E3 plan | **Decided (D-024)** |
+| Q42 | New columns `class_enrollments.institute_id` and `attendances.class_id`, plus the parent keys `classes (id, institute_id)`, `class_sessions (id, class_id)` and `class_enrollments (id, class_id)` | Approved: tenant and cross-class invariants enforced by composite FKs | **Decided (D-024)** |
+| Q43 | X5: fee versions | No `uuid`; `effective_to` set once, from NULL; model guard against any other change | **Decided (D-024)** |
+| Q44 | `attendances.notes` length | `VARCHAR(500)` | **Decided (D-024)** |
+| Q45 | Whole-minute times (`HH:MM`) | `SECOND(...) = 0` CHECK | **Decided (D-024)** |
+| Q46 | Class status transitions | `draft → active → archived`, also `draft → archived`; `archived` is final; an archived class takes no enrolments, sessions or attendance | **Decided (D-024)** |
+| Q47 | Date and state boundaries | Enrolment and session creation need an `active` class. `enrolled_on` **may be in the future** but must be `>= starts_on` and `<= ends_on` (when set). `session_date` must fall within `starts_on`–`ends_on`. Withdrawal before `enrolled_on` → `withdrawn_on = enrolled_on` (zero-length). A withdrawal that would invalidate existing attendance → `409` | **Decided (D-024)** |
+| Q48 | What "active on `session_date`" means | `enrolled_on <= d < withdrawn_on` (withdrawal day not included) | **Decided (D-024)** |
+| Q49 | Attendance audit payloads | One `attendance.recorded` per new row (`session_uuid`, `enrollment_uuid`, `status`, `method`); `attendance.corrected` with old and new `status`/`method` and `notes_changed` only, never the note text | **Decided (D-024)** |
+| Q50 | Cancelling a session that has attendance | Refused (`409`); attendance history is never orphaned | **Decided (D-024)** |
+| Q51 | Guardian view of attendance after the enrolment is withdrawn (§10.5) | Past sessions stay visible; the guardian link governs access, not the enrolment | **Decided (D-024)** |
+| Q52 | Catalogue index; `slug` | As G5.1; `slug` not built | **Decided (D-024)** |
+| Q53 | The Eloquent model name (`class` is a PHP reserved word) | `App\Models\TuitionClass`, table `classes`, morph alias `class` | **Decided (D-024)** |
+| Q54 | `current_fee` when the next version starts in the future | The version in force today; before any, the earliest future one | **Decided (D-024)** |
+| Q55 | Attendance for future sessions | `409` for a `session_date` after today (`Asia/Colombo`) | **Decided (D-024)** |
+| Q56 | Attendance serialised by the institute lock | Accepted for the sprint (Pattern I); revisit with real load | **Decided (D-024)** |
+
+## M3 implementation plan (approved with D-024)
+
+- **Scope:** schema only. Five migrations, five models and constraint tests. **No** endpoints, services, seeders or packages; those are E3.
+- **Files:**
+  - `database/migrations/2026_10_29_000014`–`000018` (as above).
+  - `app/Models/TuitionClass.php`, `ClassFeeVersion.php`, `ClassEnrollment.php`, `ClassSession.php`, `Attendance.php`.
+    - Casts: `DATE` with `immutable_date:Y-m-d`; `TIME` as strings; `DATETIME` with `immutable_datetime`.
+    - Hidden internal ids; `HasPublicUuid` on the three public tables; `GuardsGeneratedColumns`.
+    - A fee-version immutability guard.
+  - `AppServiceProvider` morph map: five aliases.
+  - `tests/Feature/Schema/Concerns/SchemaFixtures.php`: `insertClass`, `insertFeeVersion`, `insertEnrollment`, `insertSession`, `insertAttendance`.
+  - New tests, all with `RefreshDatabase`:
+    - `R3SchemaStructureTest`;
+    - `ClassConstraintsTest`, `FeeVersionConstraintsTest`, `EnrollmentConstraintsTest`, `SessionConstraintsTest`, `AttendanceConstraintsTest`;
+    - additions to `GeneratedColumnGuardTest`, `MorphMapTest` and `PublicUuidTest`;
+    - a model test for fee immutability.
+  - Docs:
+    - a D-024 entry (M3 verified);
+    - Part 3's status;
+    - `DateTimeConventionTest`'s table list.
+- **Expected tests:** about **45–55 new** (VP-60–VP-75, VP-79, VP-80, and the database half of VP-81; VP-76–VP-78 and VP-82–VP-83 come with E3), so roughly **497–507** in total.
+- **Verification:** `php artisan test` (D-010 guard; `tuitionhub_test` only), `migrate --pretend` against `tuitionhub_test` for review, and `git diff --check`. Applying M3 to `tuitionhub` is a separate approval.

@@ -39,6 +39,30 @@ class DomainRuleException extends RuntimeException
 
     public const INSTITUTE_SUSPENDED = 'institute_suspended';
 
+    public const INVITATION_PENDING = 'invitation_pending';
+
+    public const INVITATION_NOT_PENDING = 'invitation_not_pending';
+
+    public const LINK_ALREADY_ACTIVE = 'link_already_active';
+
+    public const CLASS_FULL = 'class_full';
+
+    public const CLASS_ARCHIVED = 'class_archived';
+
+    public const INVALID_STATUS_TRANSITION = 'invalid_status_transition';
+
+    public const MAX_STUDENTS_BELOW_ACTIVE = 'max_students_below_active';
+
+    public const ATTENDANCE_RECORDED = 'attendance_recorded';
+
+    public const SESSION_SLOT_TAKEN = 'session_slot_taken';
+
+    public const SESSION_CANCELLED = 'session_cancelled';
+
+    public const SESSION_HAS_ATTENDANCE = 'session_has_attendance';
+
+    public const SESSION_IN_FUTURE = 'session_in_future';
+
     /** 409 state conflicts, rendered with their reason code. */
     private const CONFLICTS = [
         self::ROLE_ALREADY_GRANTED => 'This role is already granted.',
@@ -46,6 +70,18 @@ class DomainRuleException extends RuntimeException
         self::OWNER_ADMIN_REVOCATION_FORBIDDEN => 'The institute owner always keeps the institute admin role.',
         self::ALREADY_ACTIVE => 'This record is already active.',
         self::NOT_ACTIVE => 'This record is not active.',
+        self::INVITATION_PENDING => 'A pending invitation already exists for this phone number.',
+        self::INVITATION_NOT_PENDING => 'This invitation is no longer pending.',
+        self::LINK_ALREADY_ACTIVE => 'This guardian is already linked to the student.',
+        self::CLASS_FULL => 'This class is full.',
+        self::CLASS_ARCHIVED => 'This class is archived and cannot be changed.',
+        self::INVALID_STATUS_TRANSITION => 'This status change is not allowed.',
+        self::MAX_STUDENTS_BELOW_ACTIVE => 'The class has more active enrolments than this capacity.',
+        self::ATTENDANCE_RECORDED => 'Attendance is already recorded on or after this date.',
+        self::SESSION_SLOT_TAKEN => 'This class already has a session at this date and start time.',
+        self::SESSION_CANCELLED => 'This session is cancelled.',
+        self::SESSION_HAS_ATTENDANCE => 'Attendance has been recorded for this session.',
+        self::SESSION_IN_FUTURE => 'Attendance cannot be recorded for a future session.',
     ];
 
     /** 422 invalid values: reason => [field, message]. */

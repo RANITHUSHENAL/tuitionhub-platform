@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Exceptions\DomainRuleException;
+use App\Exceptions\ServiceBusyException;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
@@ -41,6 +42,17 @@ class ErrorMappingTest extends TestCase
         $this->getJson('/api/v1/__test/domain-rule/'.DomainRuleException::NOT_ELIGIBLE)
             ->assertForbidden()
             ->assertJsonPath('reason', DomainRuleException::NOT_ELIGIBLE);
+    }
+
+    public function test_service_busy_is_503_with_retry_after_and_no_store(): void
+    {
+        Route::middleware('api')->get('/api/v1/__test/busy', fn () => throw new ServiceBusyException);
+
+        $this->getJson('/api/v1/__test/busy')
+            ->assertStatus(503)
+            ->assertExactJson(['message' => 'The service is busy. Please try again.'])
+            ->assertHeader('Retry-After', '1')
+            ->assertHeader('Cache-Control', 'no-store, private');
     }
 
     public function test_institute_suspended_is_403_with_a_reason_code(): void

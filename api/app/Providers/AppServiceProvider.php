@@ -3,7 +3,12 @@
 namespace App\Providers;
 
 use App\Audit\AuditContext;
+use App\Guardians\GuardianInviteCodes;
+use App\Models\Attendance;
 use App\Models\AuditLog;
+use App\Models\ClassEnrollment;
+use App\Models\ClassFeeVersion;
+use App\Models\ClassSession;
 use App\Models\GuardianInvitation;
 use App\Models\GuardianProfile;
 use App\Models\Institute;
@@ -14,6 +19,7 @@ use App\Models\StudentGuardian;
 use App\Models\StudentProfile;
 use App\Models\TeacherAssignment;
 use App\Models\TeacherProfile;
+use App\Models\TuitionClass;
 use App\Models\User;
 use App\Models\UserRole;
 use App\Otp\FakeOtpDriver;
@@ -21,7 +27,12 @@ use App\Otp\LogOtpDriver;
 use App\Otp\OtpCodeHasher;
 use App\Otp\OtpDriver;
 use App\Otp\UnavailableOtpDriver;
+use App\Policies\ClassEnrollmentPolicy;
+use App\Policies\ClassPolicy;
+use App\Policies\ClassSessionPolicy;
+use App\Policies\GuardianInvitationPolicy;
 use App\Policies\InstitutePolicy;
+use App\Policies\StudentPolicy;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -51,6 +62,9 @@ class AppServiceProvider extends ServiceProvider
 
         // Read per resolution, so a missing OTP_HMAC_KEY fails OTP operations only (503).
         $this->app->bind(OtpCodeHasher::class, fn () => new OtpCodeHasher(config('otp.hmac_key')));
+
+        // Likewise: a missing GUARDIAN_INVITE_HMAC_KEY fails invitation create and accept only (503).
+        $this->app->bind(GuardianInviteCodes::class, fn () => new GuardianInviteCodes(config('guardian_invites.hmac_key')));
     }
 
     /**
@@ -89,8 +103,19 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('api-public', fn (Request $request) => Limit::perMinute(60)->by('api-public-ip|'.$request->ip()));
 
+        // E2-7: every accept attempt counts, keyed by user only (never by the submitted code).
+        RateLimiter::for('guardian-invite-accept', fn (Request $request) => Limit::perMinutes(
+            15,
+            (int) config('guardian_invites.accept_attempts_per_15_minutes'),
+        )->by('guardian-accept-user|'.$request->user()?->getKey()));
+
         // Explicit rather than discovered, so a renamed class can never silently drop the policy.
         Gate::policy(Institute::class, InstitutePolicy::class);
+        Gate::policy(StudentProfile::class, StudentPolicy::class);
+        Gate::policy(GuardianInvitation::class, GuardianInvitationPolicy::class);
+        Gate::policy(TuitionClass::class, ClassPolicy::class);
+        Gate::policy(ClassEnrollment::class, ClassEnrollmentPolicy::class);
+        Gate::policy(ClassSession::class, ClassSessionPolicy::class);
 
         // Outside production, mass-assigning a guarded attribute, lazy loading and reading a
         // missing attribute throw instead of failing silently.
@@ -111,6 +136,12 @@ class AppServiceProvider extends ServiceProvider
             'guardian_invitation' => GuardianInvitation::class,
             'student_guardian' => StudentGuardian::class,
             'audit_log' => AuditLog::class,
+            // G5/G6 (D-024).
+            'class' => TuitionClass::class,
+            'class_fee_version' => ClassFeeVersion::class,
+            'class_session' => ClassSession::class,
+            'class_enrollment' => ClassEnrollment::class,
+            'attendance' => Attendance::class,
         ]);
     }
 }

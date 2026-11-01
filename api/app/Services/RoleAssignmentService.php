@@ -9,15 +9,19 @@ use App\Models\Institute;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\UserRole;
+use App\Support\Transactions;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
 
 /**
  * The only writer of user_roles (D-011; docs/SPRINT_SCHEMA.md G2.2). role_scope always comes from
  * the roles row, never from input.
  *
- * Lock order shared by all services: users → institutes → institute_staff / teacher_institute
- * → user_roles. Only existing rows are locked; inserts rely on the unique keys.
+ * Locking conventions (D-022): Pattern U (self-scoped) locks the caller's users row first and
+ * nothing institute-scoped afterwards; Pattern I (institute-scoped) locks institutes first, then
+ * institute_staff / teacher_institute → user_roles, and takes users rows only with shared locks
+ * (foreign-key checks, audit rows). Only existing rows are locked; inserts rely on the unique keys.
+ * Known latent risk L1: revoke() locks a user_roles range (not a unique key) and could deadlock
+ * with InstituteService::create when the revoking actor is the same user; no endpoint reaches it.
  */
 class RoleAssignmentService
 {
@@ -33,7 +37,7 @@ class RoleAssignmentService
         $role = $this->role($roleName);
         $this->assertScope($role, $institute);
 
-        return DB::transaction(function () use ($user, $role, $institute) {
+        return Transactions::retrying(function () use ($user, $role, $institute) {
             $userRole = new UserRole;
             $userRole->forceFill([
                 'user_id' => $user->getKey(),
@@ -66,7 +70,7 @@ class RoleAssignmentService
         $role = $this->role($roleName);
         $this->assertScope($role, $institute);
 
-        DB::transaction(function () use ($user, $role, $institute) {
+        Transactions::retrying(function () use ($user, $role, $institute) {
             $lockedInstitute = $institute === null
                 ? null
                 : Institute::query()->whereKey($institute->getKey())->lockForUpdate()->firstOrFail();

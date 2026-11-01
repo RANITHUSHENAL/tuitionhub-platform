@@ -9,9 +9,9 @@ use App\Models\Institute;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\District;
+use App\Support\Transactions;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 /**
@@ -40,8 +40,8 @@ class InstituteService
      */
     public function create(User $owner, array $attributes): Institute
     {
-        return DB::transaction(function () use ($owner, $attributes) {
-            // Lock order: users first.
+        return Transactions::retrying(function () use ($owner, $attributes) {
+            // Pattern U (D-022): the owner's users row first; afterwards only new rows are written.
             $owner = User::query()->whereKey($owner->getKey())->lockForUpdate()->firstOrFail();
 
             if ($owner->status !== 'active' || $owner->phone_verified_at === null || $owner->name === null) {
@@ -84,8 +84,8 @@ class InstituteService
      */
     public function update(User $actor, Institute $institute, array $attributes): Institute
     {
-        return DB::transaction(function () use ($actor, $institute, $attributes) {
-            // Lock order: users → institutes. Only the institute row is locked here.
+        return Transactions::retrying(function () use ($actor, $institute, $attributes) {
+            // Pattern I (D-022): the institute row first; users rows only shared (audit foreign key).
             $institute = Institute::query()->whereKey($institute->getKey())->lockForUpdate()->firstOrFail();
 
             $gate = Gate::forUser($actor);

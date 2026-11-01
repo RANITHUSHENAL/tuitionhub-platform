@@ -2,11 +2,21 @@
 
 use App\Http\Controllers\Api\V1\Auth\OtpController;
 use App\Http\Controllers\Api\V1\Auth\SessionController;
+use App\Http\Controllers\Api\V1\ChildAttendanceController;
+use App\Http\Controllers\Api\V1\ClassController;
+use App\Http\Controllers\Api\V1\ClassEnrollmentController;
+use App\Http\Controllers\Api\V1\ClassSessionController;
+use App\Http\Controllers\Api\V1\GuardianInvitationController;
+use App\Http\Controllers\Api\V1\GuardianLinkController;
 use App\Http\Controllers\Api\V1\InstituteController;
 use App\Http\Controllers\Api\V1\InstituteTeacherController;
 use App\Http\Controllers\Api\V1\LookupController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\MyInstitutesController;
+use App\Http\Controllers\Api\V1\MyTeacherClassesController;
+use App\Http\Controllers\Api\V1\ParentChildrenController;
+use App\Http\Controllers\Api\V1\PublicClassController;
+use App\Http\Controllers\Api\V1\SessionAttendanceController;
 use App\Http\Controllers\Api\V1\StudentController;
 use App\Http\Controllers\Api\V1\TeacherProfileController;
 use App\Http\Middleware\BindAuditContext;
@@ -15,7 +25,7 @@ use App\Http\Middleware\RequireStatefulFrontend;
 use Illuminate\Support\Facades\Route;
 
 /*
-| /api/v1 — contract v0.6. Session (cookie) auth only: bearer tokens are disabled (D-019).
+| /api/v1 — contract v0.9. Session (cookie) auth only: bearer tokens are disabled (D-019).
 */
 
 Route::prefix('v1')->group(function () {
@@ -36,6 +46,11 @@ Route::prefix('v1')->group(function () {
 
     // Public reference data (§4.6). No auth and no internal IDs. 60 requests per minute per IP.
     Route::get('lookups', LookupController::class)->middleware('throttle:api-public');
+
+    // E3a public catalogue (§7.5) and class page (§7.3), 60 per minute per IP. The class page reads
+    // an optional SPA session itself: authorised callers get the full Class, others PublicClass or 404.
+    Route::get('public/classes', PublicClassController::class)->middleware('throttle:api-public');
+    Route::get('classes/{class}', [ClassController::class, 'show'])->middleware('throttle:api-public');
 
     // Authenticated endpoints (D-020). Order matters: 401 (unauthenticated or bearer-only), then
     // 403 for a suspended account, and only then is the audit actor bound for this request.
@@ -58,5 +73,30 @@ Route::prefix('v1')->group(function () {
             Route::get('institutes/{institute}/teachers', [InstituteTeacherController::class, 'index']);
             Route::post('institutes/{institute}/students', [StudentController::class, 'store']);
             Route::get('institutes/{institute}/students', [StudentController::class, 'index']);
+
+            // E2 (§9.1–§9.5). Accepting is also limited to 5 attempts per 15 minutes per user (E2-7).
+            Route::post('students/{student}/guardian-invitations', [GuardianInvitationController::class, 'store']);
+            Route::post('guardian-invitations/accept', [GuardianInvitationController::class, 'accept'])
+                ->middleware('throttle:guardian-invite-accept');
+            Route::post('guardian-invitations/{invitation}/revoke', [GuardianInvitationController::class, 'revoke']);
+            Route::delete('students/{student}/guardian-links/{guardianUuid}', [GuardianLinkController::class, 'destroy']);
+            Route::get('parents/me/children', ParentChildrenController::class);
+
+            // E3a (§6.4, §7.1, §7.2, §7.4, §8.3–§8.5).
+            Route::get('me/teacher/classes', MyTeacherClassesController::class);
+            Route::post('institutes/{institute}/classes', [ClassController::class, 'store']);
+            Route::get('institutes/{institute}/classes', [ClassController::class, 'index']);
+            Route::patch('classes/{class}', [ClassController::class, 'update']);
+            Route::post('classes/{class}/enrollments', [ClassEnrollmentController::class, 'store']);
+            Route::get('classes/{class}/enrollments', [ClassEnrollmentController::class, 'index']);
+            Route::post('enrollments/{enrollment}/withdraw', [ClassEnrollmentController::class, 'withdraw']);
+
+            // E3b (§10.1–§10.6).
+            Route::post('classes/{class}/sessions', [ClassSessionController::class, 'store']);
+            Route::get('classes/{class}/sessions', [ClassSessionController::class, 'index']);
+            Route::post('sessions/{session}/cancel', [ClassSessionController::class, 'cancel']);
+            Route::post('sessions/{session}/attendance', [SessionAttendanceController::class, 'store']);
+            Route::get('sessions/{session}/attendance', [SessionAttendanceController::class, 'show']);
+            Route::get('parents/me/children/{student}/attendance', ChildAttendanceController::class);
         });
 });
