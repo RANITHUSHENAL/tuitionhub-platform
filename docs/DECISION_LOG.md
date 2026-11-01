@@ -786,7 +786,7 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - lock order, re-authorization and the unique-key backstop 6.
 
   `AuditLoggerTest` was adjusted as in item 8.
-- **Open:** E3b (sessions §10.1–§10.2, cancel §10.6, attendance §10.3–§10.5); real two-process concurrency (E2c); applying M3 to `tuitionhub` (separate approval).
+- **Open:** E3b (sessions §10.1–§10.2, cancel §10.6, attendance §10.3–§10.5); real two-process concurrency (E2c).
 
 ## D-027 — E3b sessions, cancellation, attendance and the guardian attendance view — **Verified by automated tests 2026-11-01**
 
@@ -843,7 +843,7 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - mark attendance 9 (including notes semantics), attendance sheet 2, guardian attendance and children enrolments 5;
   - lock order, re-authorization and the slot backstop 5;
   - class dates and sessions 1.
-- **Open:** E4 (invoices, demo payments, commission; an invoice requires an active enrolment, D-026); real two-process concurrency (E2c); applying M3 to `tuitionhub` (separate approval); frontend wiring of the core journey.
+- **Open:** E4 (invoices, demo payments, commission; an invoice requires an active enrolment, D-026); real two-process concurrency (E2c); frontend wiring of the core journey.
 
 ## R1 design notes — not yet approved
 
