@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Version** | `v1` draft 0.9 |
-| **Date** | 2026-11-01 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29; 0.6.1, 0.7, 0.7.1, 0.8: 2026-11-01) |
+| **Version** | `v1` draft 0.10 |
+| **Date** | 2026-11-02 (0.1: 2026-10-19; 0.2: 2026-10-28; 0.3: 2026-10-28; 0.4, 0.5, 0.6: 2026-10-29; 0.6.1, 0.7, 0.7.1, 0.8, 0.9: 2026-11-01) |
 | **Status** | **Draft** — the contract for the four-week demo sprint. Endpoints may change before implementation; any change is recorded in §16. |
 | **Base prefix** | `/api/v1` (Laravel app under `/api`) |
-| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). Guardian links (§9) follow decisions E2-1–E2-9 (D-023). Classes, fees and enrolments (§6.4, §7, §8.3–§8.5) follow the R3 schema decisions (D-024) and E3a (D-026); sessions and attendance (§10) follow E3b (D-027). |
+| **Decisions** | Implements `docs/PRODUCT_DECISIONS.md` C1–C8 and the OTP decision. The role model in §3 follows approved C8 (`docs/DECISION_LOG.md` D-011). Guardianship, invitation codes, guardian billing access and audit rules follow approved D-015. HTTP conventions, `PATCH /me`, institutes and lookups follow founder decisions FD-1–FD-10 (`docs/DECISION_LOG.md` D-020). Guardian links (§9) follow decisions E2-1–E2-9 (D-023). Classes, fees and enrolments (§6.4, §7, §8.3–§8.5) follow the R3 schema decisions (D-024) and E3a (D-026); sessions and attendance (§10) follow E3b (D-027). The E2b read endpoints (§6.5, §8.6, §9.6, §9.7) follow founder decisions approved 2026-11-02 (D-028). |
 | **Schema source** | `docs/reference/TuitionHub_ER_Schema.md` (canonical starting schema), adapted as listed in §2. |
 
 > **Demo-money boundary.** Nothing in this contract moves real money. All payments are `provider: "mock"`, all commission rows are demo accruals, and there are no settlement, payout, refund-processing or live-gateway endpoints. See §11.
@@ -96,7 +96,7 @@ Business-rule errors carry a stable machine-readable `reason` code where the cli
 | `409` | State conflict (duplicate active enrolment, capacity full, already paid, invitation already used, …), with a `reason` code (§1.3) |
 | `419` | CSRF token missing or invalid on a stateful SPA request (§1.2). The SPA should fetch `/sanctum/csrf-cookie` again and retry once. |
 | `422` | Validation error |
-| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.4, §7.1, §7.2, §7.4, §8, §9 and §10 share **60 requests per minute per user**; the public `GET /lookups`, `GET /classes/{uuid}` (§7.3) and `GET /public/classes` (§7.5) allow **60 per minute per IP** each. The OTP endpoints (§4.1, §4.2) have only their own limits. Accepting an invitation (§9.2) is also limited to **5 attempts per 15 minutes per user** (E2-7). |
+| `429` | Rate limited / attempts exhausted (`Retry-After` header set). General limits (D-020): the authenticated endpoints in §4.5, §5, §6.1–§6.5, §7.1, §7.2, §7.4, §8, §9 and §10 share **60 requests per minute per user**; the public `GET /lookups`, `GET /classes/{uuid}` (§7.3) and `GET /public/classes` (§7.5) allow **60 per minute per IP** each. The OTP endpoints (§4.1, §4.2) have only their own limits. Accepting an invitation (§9.2) is also limited to **5 attempts per 15 minutes per user** (E2-7). |
 | `503` | A required service is unavailable or not configured (e.g. OTP driver or OTP key, §4.1; invitation key, §9.1). Fails closed; never degrades to an insecure fallback. **Also** `{"message":"The service is busy. Please try again."}` with `Retry-After: 1` when a write lost a database concurrency race: a deadlock still failing after 3 attempts, or a row lock not obtained within 10 s (D-022). Nothing was saved, so the client may repeat the request. |
 
 ### 1.5 Data types
@@ -552,6 +552,16 @@ Teacher shape (`Teacher`):
 - **Success `200`:** paginated `Class[]` (§7).
 - **Errors:** `401`, `403` (no teacher profile), `422` (filters or pagination).
 
+### 6.5 `GET /api/v1/me/teacher-profile`
+
+**Approved (E2b, D-028, 2026-11-02).** Read-only counterpart of §6.1, so a client never has to send an empty `POST` to see its own profile.
+
+- **Permission:** `authenticated`; returns only the caller's own profile.
+- **Request:** no query fields; any query field → `422` (§1.6).
+- **Success `200`:** `{ "data": Teacher }` (§6 shape: `uuid`, `display_name`, `headline`, `bio`, `years_experience`). No `user_id`, internal `id`, `is_independent` or `public_visibility`.
+- **Rules:** never creates or changes a profile; not audited.
+- **Errors:** `401`; `403` (suspended account); `404` `{"message":"Not found."}` when the caller has no teacher profile; `422`; `429`.
+
 ---
 
 ## 7. Classes and catalogue
@@ -791,6 +801,17 @@ Student shape (`Student`, institute view):
   - Runs under the institute, class and enrolment row locks. Audited (`enrollment.withdrawn`, §13).
 - **Errors:** `401`, `403`, `404`, `409`, `422`.
 
+### 8.6 `GET /api/v1/students/{studentUuid}`
+
+**Approved (E2b, D-028, 2026-11-02).** One student, for the student's institute.
+
+- **Permission:** admins and active staff of the student's **managing** institute — the readers of §8.2. A **suspended** institute stays readable by them (FD-3).
+- **Authorization** (before validation, §1.4): `super_admin` → `403` (not a member, as in §8.2). Teacher-only callers (including the teacher of a class the student attends), guardians, former staff and unrelated callers → `404`, so the student's existence is never revealed. Malformed or unknown UUID → the same `404`.
+- **Request:** no query fields; any query field → `422` (§1.6), checked after authorization.
+- **Success `200`:** `{ "data": Student }` — exactly the §8 shape returned by §8.2 (`uuid`, `full_name`, `grade`, `exam_target`, `medium`, `date_of_birth`, `has_user_account`, `active_guardian_count`, `created_at`). No internal IDs, no guardian details.
+- **Rules:** read-only; not audited.
+- **Errors:** `401`, `403`, `404`, `422`, `429`.
+
 ---
 
 ## 9. Guardian links
@@ -929,6 +950,75 @@ Student shape (`Student`, institute view):
 - **Rules:** scoped in the query to the caller's own active links, re-read on every request (a revoked link disappears on the next request). Ordered by `linked_at`, then internal link order. Students of a **suspended** institute are included (E2-3). A user with no guardian profile gets an empty page.
 - **`active_enrollments`** (D-027, superseding E2-1's empty list): the child's enrolments with status `active` (including ones starting in the future), ordered by `enrolled_on`, then internal order. Each item has the enrolment `uuid`, `class` (`uuid`, `title`) and `institute` (`name` only). Withdrawn enrolments are not listed; their past attendance stays in §10.5.
 - **Errors:** `401`, `422` (pagination).
+
+### 9.6 `GET /api/v1/students/{studentUuid}/guardians?page=&per_page=`
+
+**Approved (E2b, D-028, 2026-11-02).** The student's **active** guardian links, so the institute can see who is linked and revoke a link (§9.4) without asking the parent for an ID.
+
+- **Permission and authorization:** exactly as §8.6 (admins and active staff of the managing institute, also while suspended; `super_admin` `403`; everyone else `404`).
+- **Request:** `page`, `per_page` (§1.3). Any other query field → `422` (§1.6), checked after authorization.
+- **Success `200`:** paginated
+
+```json
+{
+  "data": [
+    {
+      "guardian": { "uuid": "uuid", "name": "Fictional Parent" },
+      "relationship": "mother",
+      "is_primary": true,
+      "linked_at": "2026-11-01T09:00:00Z",
+      "guardian_phone_masked": "+9477*****67"
+    }
+  ],
+  "meta": { "current_page": 1, "per_page": 25, "total": 1, "last_page": 1 }
+}
+```
+
+- **Fields:**
+  - `guardian.uuid` is the guardian's **user** UUID — the `guardianUuid` that §9.4 takes. Never `guardian_profiles` or `users` internal IDs.
+  - `guardian.name` is the account name set through §4.5 (`null` if the guardian has not completed onboarding).
+  - `guardian_phone_masked` is the guardian's account phone masked as in §9.1 (`+9477*****67`: the first five characters, five `*`, the last two). The full number is never returned.
+  - No invitation data (no code, code hash or invitation ID).
+- **Scope:** only links with `revoked_at IS NULL` for this student, in the query itself. Revoked links are history and are never listed.
+- **Order:** primary first, then `linked_at` (oldest first), then internal link order as the unique tiebreaker.
+- **Rules:** read-only; not audited; creates no role or guardian rows.
+- **Errors:** `401`, `403`, `404`, `422` (filters or pagination), `429`.
+
+### 9.7 `GET /api/v1/students/{studentUuid}/guardian-invitations?status=&page=&per_page=`
+
+**Approved (E2b, D-028, 2026-11-02).** The student's invitation history, so pending invitations can be revoked (§9.3) after the one-time code has been handed over.
+
+- **Permission and authorization:** exactly as §8.6.
+- **Request:** `status` (optional; one of `pending`, `accepted`, `revoked`, `expired`), `page`, `per_page`. Any other query field (for example `code`) → `422` (§1.6), checked after authorization.
+- **Success `200`:** paginated
+
+```json
+{
+  "data": [
+    {
+      "uuid": "uuid",
+      "relationship": "mother",
+      "guardian_phone_masked": "+9477*****67",
+      "status": "pending",
+      "expires_at": "2026-11-03T08:30:00Z",
+      "created_at": "2026-11-01T08:30:00Z",
+      "invited_by": { "uuid": "uuid", "name": "Fictional Staff Member" }
+    }
+  ],
+  "meta": { "current_page": 1, "per_page": 25, "total": 1, "last_page": 1 }
+}
+```
+
+- **Never returned:** the plaintext code, `code_hash`, the full phone, internal IDs, or any key material. `invited_by.uuid` is the inviter's user UUID; `invited_by.name` their account name.
+- **Effective status** (§9.1 lazy expiry), evaluated at a single instant per request (whole seconds, UTC):
+  - `pending` — stored `pending` and `expires_at` later than now;
+  - `expired` — stored `expired`, **or** stored `pending` with `expires_at` at or before now;
+  - `accepted`, `revoked` — the stored status (expiry never changes a finished invitation).
+- **Filtering matches the displayed status:** the `status` filter uses the same rules in the query, at the same instant, so `?status=pending` never returns an expired invitation and `?status=expired` includes lapsed invitations still stored as `pending`.
+- **No lazy write:** listing never updates a row. A lapsed invitation stays stored as `pending` until a write touches it (§9.1).
+- **Scope and order:** only this student's invitations, in the query itself; `created_at` newest first, then internal order (newest first).
+- **Rules:** read-only; not audited.
+- **Errors:** `401`, `403`, `404`, `422` (status, filters or pagination), `429`.
 
 ---
 
@@ -1408,6 +1498,7 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 6.2 | POST | `/api/v1/institutes/{instituteUuid}/teacher-assignments` | same-institute owner/admin, super_admin; suspended → super_admin only |
 | 6.3 | GET | `/api/v1/institutes/{instituteUuid}/teachers` | same-institute staff/admin, super_admin (incl. suspended institutes) |
 | 6.4 | GET | `/api/v1/me/teacher/classes` | authenticated teacher (active assignments only) |
+| 6.5 | GET | `/api/v1/me/teacher-profile` | authenticated (self) (D-028) |
 | 7.1 | POST | `/api/v1/institutes/{instituteUuid}/classes` | same-institute owner/admin (not super_admin); not while suspended |
 | 7.2 | GET | `/api/v1/institutes/{instituteUuid}/classes` | same-institute staff/admin, super_admin (incl. suspended institutes) |
 | 7.3 | GET | `/api/v1/classes/{classUuid}` | public if active+public at an active institute; else assigned teacher, same-institute staff/admin, super_admin |
@@ -1418,11 +1509,14 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 8.3 | POST | `/api/v1/classes/{classUuid}/enrollments` | same-institute staff/admin (not super_admin); not while suspended |
 | 8.4 | GET | `/api/v1/classes/{classUuid}/enrollments` | assigned teacher, same-institute staff/admin, super_admin |
 | 8.5 | POST | `/api/v1/enrollments/{enrollmentUuid}/withdraw` | same-institute staff/admin (not super_admin); not while suspended |
+| 8.6 | GET | `/api/v1/students/{studentUuid}` | managing-institute staff/admin (not super_admin; incl. suspended institutes) (D-028) |
 | 9.1 | POST | `/api/v1/students/{studentUuid}/guardian-invitations` | managing-institute staff/admin (not super_admin); not while suspended |
 | 9.2 | POST | `/api/v1/guardian-invitations/accept` | authenticated, phone match, 5 attempts per 15 min; not while the institute is suspended |
 | 9.3 | POST | `/api/v1/guardian-invitations/{invitationUuid}/revoke` | inviter (same institute), same-institute admin, super_admin |
 | 9.4 | DELETE | `/api/v1/students/{studentUuid}/guardian-links/{guardianUuid}` | managing-institute admin, super_admin |
 | 9.5 | GET | `/api/v1/parents/me/children` | authenticated (active links; incl. suspended institutes) |
+| 9.6 | GET | `/api/v1/students/{studentUuid}/guardians` | managing-institute staff/admin (not super_admin; incl. suspended institutes) (D-028) |
+| 9.7 | GET | `/api/v1/students/{studentUuid}/guardian-invitations` | managing-institute staff/admin (not super_admin; incl. suspended institutes) (D-028) |
 | 10.1 | POST | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, institute manager; active class; not while suspended |
 | 10.2 | GET | `/api/v1/classes/{classUuid}/sessions` | assigned teacher, same-institute staff/admin, super_admin |
 | 10.3 | POST | `/api/v1/sessions/{sessionUuid}/attendance` | assigned teacher, same-institute staff/admin; not while suspended |
@@ -1457,3 +1551,4 @@ No endpoints for: Study, meetups, map-based social discovery or chat (C7); exams
 | 0.7.1 draft | 2026-11-01 | **R3 schema approved (D-024).** §8.3: `enrolled_on` may be in the future, within the class's `starts_on`–`ends_on`; enrolments are never deleted or reactivated. **New §8.5 (proposed, E3):** withdraw an enrolment, with a withdrawal before `enrolled_on` stored as `withdrawn_on = enrolled_on` (zero-length), and a withdrawal that would invalidate existing attendance → `409`. §10.1: whole-minute times; uniqueness is among **non-cancelled** sessions, so a cancelled session frees its slot. **New §10.6 (proposed, E3):** cancel a session (`scheduled` only; not if it has attendance). §15: rows 8.5 and 10.6 (proposed). No implemented endpoint changed. |
 | 0.8 draft | 2026-11-01 | **E3a: classes, fee versions, enrolments, teacher classes and the public catalogue (D-026).** §1.3: `409` reasons `class_full`, `class_archived`, `invalid_status_transition`, `max_students_below_active`, `attendance_recorded`. §1.4: the per-user limit covers §6.4, §7.1, §7.2, §7.4 and §8; §7.3 and §7.5 are public at 60/min per IP. §6.4 implemented (active assignments only; `403` without a teacher profile). §7.1: field rules (money string, `max_students` 1–10,000, dates), authorization (`super_admin` `403`). §7.2: filters, order, teacher-only `403`, errors `403`/`422`. §7.3: public only at an active institute; an optional session decides `Class` vs `PublicClass`. §7.4: status transitions, archived final (`class_archived`), date and teacher rules, `fee.effective_from` `422`, unchanged writes nothing. §7.5: filters, hidden teacher omitted. §8.3: `enrolled_on` defaults to today; `not_active`, `already_active`, `class_full`; `super_admin` `403`. §8.4: filter, order, `super_admin` allowed. **§8.5 finalised:** `withdrawn_on` required and not in the future; zero-length clamp; `attendance_recorded`; `enrollment.withdrawn`. §13: `enrollment.withdrawn` added; payloads for the five class and enrolment events. §15 labels. **Visibility first** for §7.4, §8.3 and §8.5: callers who cannot see the class get `404` (including unassigned teachers at the institute), those who can see it but may not act get `403`; authorization always precedes validation. |
 | 0.9 draft | 2026-11-01 | **E3b: sessions, cancellation, attendance and the guardian attendance view (D-027).** §1.3: `409` reasons `session_slot_taken`, `session_cancelled`, `session_has_attendance`, `session_in_future`. §1.4: the per-user limit covers §10. §9.5: `active_enrollments` filled with the child's active enrolments (supersedes E2-1). §10.1: visibility-first authorization, active class, dates within the class, `HH:MM` times, audit. §10.2: filters, order, cancelled sessions listed. §10.3: future sessions `409` (decided), archived class `409`, eligibility `enrolled_on <= d < withdrawn_on`, per-record `422`, upsert and correction rules, `notes` up to 500 characters. §10.4: rows include enrolments marked for the session, order, `super_admin` `403`. §10.5: window defaults and limits, order, past attendance kept after withdrawal, no notes. **§10.6 finalised:** `session_cancelled`, `session_has_attendance`, `class_archived`, audit. §13: `session.created` and `session.cancelled` added; payloads for the session and attendance events. §15 labels. Class date changes must keep every non-cancelled session inside the new dates (`422`). |
+| 0.10 draft | 2026-11-02 | **E2b: read-only endpoints for the F3 frontend — founder decisions approved 2026-11-02 (D-028).** **New §6.5** `GET /me/teacher-profile` (own profile; `404` without one; replaces the empty-`POST` workaround). **New §8.6** `GET /students/{uuid}` (§8 `Student` shape). **New §9.6** `GET /students/{uuid}/guardians` (active links only; `guardian.uuid` is the user UUID used by §9.4; masked phone; primary first, then `linked_at`). **New §9.7** `GET /students/{uuid}/guardian-invitations` (history newest first; `status` filter on the effective status at one instant; lapsed `pending` rows reported and filtered as `expired` without being written; never the code, hash or full phone). §8.6/§9.6/§9.7 readers are those of §8.2: admins and active staff of the managing institute, also while suspended (FD-3); `super_admin` `403`; teacher-only, guardians, former staff and unrelated callers `404`. All four reject unknown query fields with `422` after authorization, write nothing and are not audited. §1.4: the per-user limit covers §6.5. §15 rows. No existing endpoint changed. |

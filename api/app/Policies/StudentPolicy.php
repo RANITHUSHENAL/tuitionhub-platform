@@ -26,6 +26,39 @@ class StudentPolicy
     public function __construct(private readonly TenantAccess $access) {}
 
     /**
+     * GET /students/{uuid} (§8.6, E2b; D-028): the same readers as the institute's student
+     * list (§8.2) — admins and active staff of the managing institute, also while the institute is
+     * suspended (FD-3). super_admin is not a member: 403. Teacher-only and unrelated callers: 404,
+     * so the student's existence is never revealed (as in §9.1).
+     */
+    public function view(User $user, StudentProfile $student): Response
+    {
+        $institute = $this->instituteFor($student->managing_institute_id, null);
+
+        if ($this->access->isInstituteAdmin($user, $institute) || $this->access->isInstituteStaff($user, $institute)) {
+            return Response::allow();
+        }
+
+        return $this->access->isSuperAdmin($user) ? Response::deny() : Response::denyAsNotFound();
+    }
+
+    /**
+     * GET /students/{uuid}/guardians (§9.6, E2b; D-028): the same readers as view().
+     */
+    public function viewGuardians(User $user, StudentProfile $student): Response
+    {
+        return $this->view($user, $student);
+    }
+
+    /**
+     * GET /students/{uuid}/guardian-invitations (§9.7, E2b; D-028): the same readers as view().
+     */
+    public function viewGuardianInvitations(User $user, StudentProfile $student): Response
+    {
+        return $this->view($user, $student);
+    }
+
+    /**
      * POST /students/{uuid}/guardian-invitations (§9.1): admins and active staff of the managing
      * institute. super_admin is not a member: 403.
      *

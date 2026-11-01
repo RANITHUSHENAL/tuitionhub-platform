@@ -845,6 +845,60 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - class dates and sessions 1.
 - **Open:** E4 (invoices, demo payments, commission; an invoice requires an active enrolment, D-026); real two-process concurrency (E2c); frontend wiring of the core journey.
 
+## D-028 — E2b read endpoints for the F3 frontend — **Verified by automated tests 2026-11-02** (founder decisions 1–7 APPROVED 2026-11-02)
+
+- **Scope:** contract → **v0.10**. Four **read-only** endpoints; **no migrations, no packages**, nothing ran against `tuitionhub`. They remove two F3 workarounds: the empty `POST /me/teacher-profile` used to read a teacher ID, and pasting a parent's account ID to revoke a link.
+
+  | § | Endpoint |
+  |---|---|
+  | §6.5 | `GET /me/teacher-profile` |
+  | §8.6 | `GET /students/{uuid}` |
+  | §9.6 | `GET /students/{uuid}/guardians` |
+  | §9.7 | `GET /students/{uuid}/guardian-invitations` |
+
+- **Authorization** (new `StudentPolicy::view`, `viewGuardians`, `viewGuardianInvitations`, one rule):
+
+  | Caller | §8.6 / §9.6 / §9.7 | §6.5 |
+  |---|---|---|
+  | Unauthenticated (incl. bearer-only, malformed UUID) | `401` | `401` |
+  | Admin of the managing institute | `200` (also while suspended) | own profile |
+  | Active staff of the managing institute | `200` (also while suspended) | own profile |
+  | `super_admin` | `403` (not a member) | own profile |
+  | Teacher-only at the institute (incl. the student's class teacher) | `404` | own profile |
+  | Linked guardian, former staff, other institutes, unrelated | `404` | own profile |
+  | Caller without a teacher profile | — | `404` |
+
+- **Founder decisions — APPROVED 2026-11-02** (none broadens an existing permission):
+  1. **Readers:** student detail, guardian list and invitation history use the approved student-read audience of §8.2 — same-institute admins and active staff — including FD-3 suspended reads. Staff may see guardian links and invitations; guardian-link removal (§9.4) remains admin-only, and the inviter (or any admin) may revoke an invitation (§9.3).
+  2. **Visibility first:** teacher-only and unrelated callers get `404` for these student-specific resources (not the `403` of §8.2, which concerns an institute they already know; as §9.1). `super_admin` keeps the approved `403`.
+  3. **Names:** `guardian.name` and `invited_by.name` are the user account name from §4.5 (`users.name`), which may be `null` before onboarding.
+  4. **Masked phones:** §9.6's `guardian_phone_masked` is the guardian's **account** phone; §9.7's is the **invited** phone. Both use the existing `PhoneMasker` (`+9477*****67`).
+  5. **Effective status:** §9.7 `status`, shown and filtered, is the effective status at one fixed instant per request (whole seconds, UTC), matching `GuardianInvitation::effectiveStatus()`, without writing to the database:
+     - `pending` = stored `pending` and `expires_at > now`;
+     - `expired` = stored `expired`, or stored `pending` with `expires_at <= now`;
+     - `accepted`/`revoked` as stored.
+
+     Filtering is done in SQL with the same conditions and the same instant used for serialization, so a filtered page never shows another status. No lazy-expiry write happens on read.
+  6. **Unknown query fields:** all four new endpoints return `422` for unknown query parameters (`RejectsUnknownFields`), checked after authorization.
+  7. **Ordering** (deterministic): §9.6 is primary first, then `linked_at`, then id; §9.7 is `created_at` desc, then id desc.
+- **Privacy:** explicit allowlist resources (`StudentGuardianResource`, `GuardianInvitationHistoryResource`). No internal IDs, full phones, codes, code hashes or key material. Revoked links never listed. Every response is `Cache-Control: no-store, private` (§1.1).
+- **Read-only:** E2b adds **no database writes, no schema changes and no audit events**: no service calls, no transactions, no audit rows, no role or guardian rows. Tests snapshot every row of `users`, `user_roles`, `teacher_profiles`, `guardian_profiles`, `student_profiles`, `student_guardians`, `guardian_invitations` and `audit_logs` before and after each read and assert they are identical. This includes a lapsed invitation that stays stored as `pending`.
+- **Tests:** 27 new — teacher profile 4, student detail 6, guardians 10, invitations 7. `php artisan test` → **627 passed (8142 assertions)** (600 existing + 27).
+- **Known compliance gap — deferred to a separate compatibility review** (not changed here): these **existing** `GET` routes accept and ignore unknown query parameters, confirmed by inspecting the request each controller uses (none uses `RejectsUnknownFields`):
+  - **Lists:**
+    - `GET /me/institutes` (§5.3), `GET /institutes` (§5.2);
+    - `GET /institutes/{uuid}/teachers` (§6.3), `GET /me/teacher/classes` (§6.4);
+    - `GET /institutes/{uuid}/classes` (§7.2), `GET /public/classes` (§7.5);
+    - `GET /institutes/{uuid}/students` (§8.2), `GET /classes/{uuid}/enrollments` (§8.4);
+    - `GET /parents/me/children` (§9.5);
+    - `GET /classes/{uuid}/sessions` (§10.2), `GET /parents/me/children/{uuid}/attendance` (§10.5).
+  - **Single resources and reference data:**
+    - `GET /auth/session` (§4.4), `GET /lookups` (§4.6);
+    - `GET /institutes/{uuid}` (§5.4), `GET /classes/{uuid}` (§7.3);
+    - `GET /sessions/{uuid}/attendance` (§10.4).
+  - **For the review:** §1.6 is written under "Writes" ("A write request may contain only the fields its endpoint lists"), so whether it binds reads is part of that review. Tightening these routes could break existing clients, so they are left unchanged here.
+- **Follow-up (not done here):** the F3 frontend still uses the interim workarounds (the empty `POST` and the account-ID paste). Switching it to §6.5, §9.6 and §9.7, and removing the account-ID display, is a separate frontend task.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.
