@@ -1,115 +1,142 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRightIcon, MegaphoneIcon } from 'lucide-react';
+import { ArrowRightIcon, MegaphoneIcon, TicketIcon } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell';
 import { parentNav } from '../../components/app/navConfig';
 import { Badge, PaymentBadge } from '../../components/ui/Badge';
-import { LinkButton } from '../../components/ui/Button';
-import { PrototypeNote } from '../../components/ui/States';
-import { ParentSetupCard } from '../../components/parent/ParentSetupCard';
+import { Button, LinkButton } from '../../components/ui/Button';
+import { LoadingLine } from '../../components/ui/FormMessage';
+import { EmptyState, ErrorState } from '../../components/ui/States';
 import { useAuth } from '../../contexts/AuthContext';
-import {
-  announcements,
-  invoices,
-  parentProfile,
-  upcomingSessions } from
-'../../data/people';
+import { useApiErrors } from '../../hooks/useApiErrors';
+import { guardianApi, type LinkedChild } from '../../lib/api';
+import { announcements, invoices, upcomingSessions } from '../../data/people';
+import { formatDate } from '../../utils/dates';
 import { lkr } from '../../utils/format';
 
+const relationshipLabel: Record<LinkedChild['relationship'], string> = {
+  mother: 'Mother',
+  father: 'Father',
+  guardian: 'Guardian',
+  aunt: 'Aunt',
+  uncle: 'Uncle'
+};
+
+/**
+ * Parent home. The children, and each child's classes, are real: GET /parents/me/children
+ * (contract §9.5), active links only, re-read on every visit. Fees, upcoming classes and
+ * announcements are not on the API yet, so they stay as sample widgets, each labelled
+ * "Sample data", and never attached to a real child.
+ */
 export function ParentOverview() {
-  const { user } = useAuth();
-  const [childIndex, setChildIndex] = useState(0);
+  const { user, account } = useAuth();
+  const describe = useApiErrors();
+  const [children, setChildren] = useState<LinkedChild[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const [selected, setSelected] = useState<string | null>(null);
 
-  // New parent: no child yet. They can explore; the setup card guides the rest.
-  if (user && (user.childrenLinked ?? 0) === 0) {
-    return (
-      <AppShell
-        role="Parent"
-        accountName={user.name}
-        accountDetail={user.detail}
-        initials={user.initials}
-        nav={parentNav}
-        title={`Hi ${user.name.split(' ')[0]}`}
-        subtitle="Your parent account is ready.">
-        
-        <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-          <ParentSetupCard welcome />
-          <aside className="space-y-4">
-            <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-              <h2 className="text-h3 text-ink">While you set up</h2>
-              <p className="mt-2 text-small text-ink-soft">
-                Browse classes, institutes and teachers. You can save classes now and enrol once
-                your child is connected.
-              </p>
-              <LinkButton to="/search" size="sm" variant="secondary" className="mt-4">
-                Find a class
-              </LinkButton>
-            </section>
-            <section className="rounded-2xl border border-line bg-surface-muted p-6">
-              <h2 className="text-h3 text-ink">After you connect a child</h2>
-              <p className="mt-2 text-small text-ink-soft">
-                This page shows their next class, attendance and any fees due —
-                for every child you add.
-              </p>
-            </section>
-          </aside>
-        </div>
-      </AppShell>);
+  // Re-fetch for a different signed-in account; never show another account's children.
+  const accountId = account?.user.uuid;
 
-  }
+  useEffect(() => {
+    let alive = true;
+    setChildren(null);
+    setLoadError(null);
+    guardianApi.
+    myChildren({ per_page: 100 }).
+    then((page) => alive && setChildren(page.data)).
+    catch((error: unknown) => alive && setLoadError(describe(error)));
+    return () => {
+      alive = false;
+    };
+  }, [accountId, reload, describe]);
 
-  const child = parentProfile.children[childIndex];
+  const child = children?.find((c) => c.student.uuid === selected) ?? children?.[0] ?? null;
+  const firstName = user?.name.split(' ')[0] || 'there';
   const due = invoices.filter((i) => i.status === 'pending' || i.status === 'failed');
-  const nextSession = upcomingSessions[0];
 
   return (
     <AppShell
       role="Parent"
-      accountName={parentProfile.name}
-      accountDetail="2 children · Nugegoda"
-      initials="CP"
+      accountName={user?.name ?? 'Parent'}
+      accountDetail={children ? `${children.length} ${children.length === 1 ? 'child' : 'children'} linked` : 'Parent'}
+      initials={user?.initials ?? 'PA'}
       nav={parentNav}
-      title="Good evening, Mrs. Perera"
-      subtitle="Here is where each child stands tonight."
+      title={`Hi ${firstName}`}
+      subtitle="Here is where each child stands."
       actions={
+      children && children.length > 1 ?
       <div className="flex rounded-xl border border-line bg-white p-1">
-          {parentProfile.children.map((c, i) =>
+            {children.map((c) =>
         <button
-          key={c.id}
-          onClick={() => setChildIndex(i)}
-          aria-pressed={i === childIndex}
+          key={c.student.uuid}
+          onClick={() => setSelected(c.student.uuid)}
+          aria-pressed={c.student.uuid === child?.student.uuid}
           className={`rounded-lg px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out ${
-          i === childIndex ? 'bg-forest text-white' : 'text-ink-soft hover:text-ink'}`
+          c.student.uuid === child?.student.uuid ? 'bg-forest text-white' : 'text-ink-soft hover:text-ink'}`
           }>
-          
-              {c.name.split(' ')[0]}
-            </button>
+
+                {c.student.full_name.split(' ')[0]}
+              </button>
         )}
-        </div>
+          </div> :
+      undefined
       }>
-      
+
       <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
         <div className="space-y-6">
-          <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
-              <div>
-                <h2 className="text-h3 text-ink">{child.name}</h2>
-                <p className="text-caption text-ink-soft">
-                  {child.grade} · {child.examTarget} · {child.school}
-                </p>
-              </div>
-              <Badge tone="neutral">{child.classesEnrolled} classes enrolled</Badge>
-            </div>
+          {loadError ?
+          <ErrorState
+            title="Your children couldn’t be loaded"
+            body={loadError}
+            action={<Button variant="secondary" size="sm" onClick={() => setReload((n) => n + 1)}>Try again</Button>} /> :
 
-            <div className="grid gap-px bg-line sm:grid-cols-2">
-              <Stat label="Next class" value={nextSession.className.split('—')[0].trim()} detail={nextSession.when} />
-              <Stat label="Attendance this term" value={`${child.attendanceRate}%`} detail="2 sessions missed" />
-            </div>
-          </section>
+          !children ?
+          <LoadingLine label="Loading your children…" /> :
+          !child ?
+          <EmptyState
+            icon={<TicketIcon className="h-5 w-5" />}
+            title="No child linked yet"
+            body="Your child's institute will provide an invitation code to link your account."
+            action={<LinkButton to="/parent/family">Link my child</LinkButton>} /> :
+
+
+          <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
+                <div>
+                  <h2 className="text-h3 text-ink">{child.student.full_name}</h2>
+                  <p className="text-caption text-ink-soft">
+                    {child.student.grade.name} · {relationshipLabel[child.relationship]} · linked {formatDate(child.linked_at)}
+                  </p>
+                </div>
+                <Badge tone="neutral">
+                  {child.active_enrollments.length} {child.active_enrollments.length === 1 ? 'class' : 'classes'} enrolled
+                </Badge>
+              </div>
+              <div className="px-6 py-4">
+                <p className="text-caption uppercase tracking-wide text-ink-faint">Classes</p>
+                {child.active_enrollments.length ?
+              <ul className="mt-2 divide-y divide-line">
+                    {child.active_enrollments.map((e) =>
+                <li key={e.uuid} className="py-2.5">
+                        <p className="text-small font-medium text-ink">{e.class.title}</p>
+                        <p className="text-caption text-ink-soft">{e.institute.name}</p>
+                      </li>
+                )}
+                  </ul> :
+
+              <p className="mt-2 text-small text-ink-soft">Not enrolled in any class yet.</p>
+              }
+              </div>
+            </section>
+          }
 
           <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-            <div className="flex items-center justify-between gap-4">
-              <h2 className="text-h3 text-ink">Needs your attention</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-h3 text-ink">
+                Needs your attention <Badge tone="neutral">Sample data</Badge>
+              </h2>
               <Link to="/parent/fees" className="text-small font-medium text-forest">
                 All fees
               </Link>
@@ -119,7 +146,7 @@ export function ParentOverview() {
               <li
                 key={inv.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line px-4 py-3">
-                
+
                   <div className="min-w-0">
                     <p className="text-small font-medium text-ink">{inv.className}</p>
                     <p className="text-caption text-ink-soft">
@@ -138,7 +165,9 @@ export function ParentOverview() {
           </section>
 
           <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-            <h2 className="text-h3 text-ink">Upcoming classes</h2>
+            <h2 className="flex items-center gap-2 text-h3 text-ink">
+              Upcoming classes <Badge tone="neutral">Sample data</Badge>
+            </h2>
             <ul className="mt-4 divide-y divide-line">
               {upcomingSessions.map((s) =>
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
@@ -163,9 +192,10 @@ export function ParentOverview() {
 
         <div className="space-y-6">
           <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <MegaphoneIcon className="h-4 w-4 text-forest" aria-hidden="true" />
               <h2 className="text-h3 text-ink">Announcements</h2>
+              <Badge tone="neutral">Sample data</Badge>
             </div>
             <ul className="mt-4 space-y-4">
               {announcements.map((a) =>
@@ -181,7 +211,7 @@ export function ParentOverview() {
             <Link
               to="/parent/announcements"
               className="mt-4 inline-flex items-center gap-1.5 text-small font-medium text-forest">
-              
+
               All announcements
               <ArrowRightIcon className="h-3.5 w-3.5" />
             </Link>
@@ -190,25 +220,14 @@ export function ParentOverview() {
           <section className="rounded-2xl border border-line bg-surface-muted p-6">
             <h2 className="text-h3 text-ink">How TuitionHub shows information</h2>
             <p className="mt-2 text-small text-ink-soft">
-              You see attendance and payments for the classes you pay for. You do not
-              see your child's location.
+              You see the children linked to your account and their classes. You do not see your child's location.
             </p>
-            <PrototypeNote>
-              Children, classes and figures on this account are fictional.
-            </PrototypeNote>
+            <p className="mt-2 text-caption text-ink-faint">
+              Your children and their classes are real. Fees, upcoming classes and announcements are sample data for now.
+            </p>
           </section>
         </div>
       </div>
     </AppShell>);
-
-}
-
-function Stat({ label, value, detail }: {label: string;value: string;detail: string;}) {
-  return (
-    <div className="bg-white px-6 py-5">
-      <p className="text-caption uppercase tracking-wide text-ink-faint">{label}</p>
-      <p className="mt-1.5 text-h2 text-ink">{value}</p>
-      <p className="mt-1 text-caption text-ink-soft">{detail}</p>
-    </div>);
 
 }

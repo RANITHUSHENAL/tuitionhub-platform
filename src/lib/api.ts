@@ -327,6 +327,29 @@ export interface CreatedInvitation {
   code: string;
 }
 
+/** §9.6 — one active guardian link. `guardian.uuid` is the guardian's user UUID, used by §9.4. */
+export interface StudentGuardianLink {
+  guardian: { uuid: string; name: string | null };
+  relationship: GuardianRelationship;
+  is_primary: boolean;
+  linked_at: string;
+  guardian_phone_masked: string;
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+/** §9.7 — one invitation in a student's history. Never carries the code. */
+export interface InvitationHistoryItem {
+  uuid: string;
+  relationship: GuardianRelationship;
+  guardian_phone_masked: string;
+  /** The effective status (an expired invitation is `expired` even if not yet saved as such). */
+  status: InvitationStatus;
+  expires_at: string;
+  created_at: string | null;
+  invited_by: { uuid: string; name: string | null };
+}
+
 export interface LinkedChild {
   student: { uuid: string; full_name: string; grade: CodeName };
   relationship: GuardianRelationship;
@@ -349,8 +372,11 @@ export const instituteApi = {
 };
 
 export const teacherApi = {
-  /** §6.1 — creates (201) or updates (200) the caller's own profile. An empty body changes nothing
-   *  and returns the stored profile, which is how an existing profile's UUID is shown. */
+  /** §6.5 — the caller's own profile; a 404 means there is none yet. */
+  myProfile: async () =>
+  (await api.get<{ data: Teacher }>('/api/v1/me/teacher-profile')).data,
+
+  /** §6.1 — creates (201) or updates (200) the caller's own profile. */
   saveMyProfile: async (input: TeacherProfileInput) =>
   (await api.post<{ data: Teacher }>('/api/v1/me/teacher-profile', input)).data,
 
@@ -373,7 +399,11 @@ export const studentApi = {
 
   /** §8.2 — same-institute admin/staff; `q` and `grade_code` filters. */
   list: (instituteUuid: string, params: {q?: string;grade_code?: string;page?: number;per_page?: number;} = {}) =>
-  api.get<Page<Student>>(`/api/v1/institutes/${seg(instituteUuid)}/students${query(params)}`)
+  api.get<Page<Student>>(`/api/v1/institutes/${seg(instituteUuid)}/students${query(params)}`),
+
+  /** §8.6 — one student, for the managing institute's admins and active staff. */
+  get: async (studentUuid: string) =>
+  (await api.get<{ data: Student }>(`/api/v1/students/${seg(studentUuid)}`)).data
 };
 
 export const guardianApi = {
@@ -390,9 +420,17 @@ export const guardianApi = {
     `/api/v1/guardian-invitations/${seg(invitationUuid)}/revoke`
   )).data,
 
-  /** §9.4 — institute admin; `guardianUuid` is the guardian's user (account) UUID. */
+  /** §9.4 — institute admin; `guardianUuid` is `guardian.uuid` from §9.6. */
   revokeLink: (studentUuid: string, guardianUuid: string) =>
   api.delete<void>(`/api/v1/students/${seg(studentUuid)}/guardian-links/${seg(guardianUuid)}`),
+
+  /** §9.6 — the student's active links, primary first. */
+  studentGuardians: (studentUuid: string, params: {page?: number;per_page?: number;} = {}) =>
+  api.get<Page<StudentGuardianLink>>(`/api/v1/students/${seg(studentUuid)}/guardians${query(params)}`),
+
+  /** §9.7 — the student's invitation history, newest first; `status` filters the effective status. */
+  studentInvitations: (studentUuid: string, params: {status?: InvitationStatus;page?: number;per_page?: number;} = {}) =>
+  api.get<Page<InvitationHistoryItem>>(`/api/v1/students/${seg(studentUuid)}/guardian-invitations${query(params)}`),
 
   /** §9.2 — any signed-in account whose phone matches the invitation. */
   accept: async (code: string) =>

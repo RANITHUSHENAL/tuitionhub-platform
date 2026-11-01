@@ -4,7 +4,6 @@ import { BuildingIcon, ChevronRightIcon, TicketIcon } from 'lucide-react';
 import { SiteHeader } from '../../components/site/SiteHeader';
 import { SiteFooter } from '../../components/site/SiteFooter';
 import { Button } from '../../components/ui/Button';
-import { CopyButton } from '../../components/ui/CopyButton';
 import { FormAlert } from '../../components/ui/FormMessage';
 import { InstituteForm } from '../../components/institute/InstituteForm';
 import { LinkChildForm } from '../../components/parent/LinkChildForm';
@@ -170,17 +169,6 @@ export function AccountHome() {
         </section>
 
         <TeacherProfileCard />
-
-        <section aria-labelledby="account-id" className="rounded-2xl border border-line bg-surface-muted p-5">
-          <h2 id="account-id" className="text-h3 text-ink">Account ID</h2>
-          <p className="mt-1 break-all font-mono text-small text-ink">{account.user.uuid}</p>
-          <p className="mt-2 text-caption text-ink-soft">
-            Only share this with your child’s institute if they ask for it to remove a parent link.
-          </p>
-          <div className="mt-3">
-            <CopyButton value={account.user.uuid} label="Copy account ID" />
-          </div>
-        </section>
 
         <Button variant="secondary" onClick={() => void logout()}>
           Sign out

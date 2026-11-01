@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { PresentationIcon } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { CopyButton } from '../ui/CopyButton';
@@ -7,18 +7,20 @@ import { FieldError, FormAlert } from '../ui/FormMessage';
 import { useAuth } from '../../contexts/AuthContext';
 import { useApiErrors } from '../../hooks/useApiErrors';
 import { fieldErrorsOf } from '../../lib/apiErrors';
-import { teacherApi, type Teacher } from '../../lib/api';
+import { ApiError, teacherApi, type Teacher } from '../../lib/api';
+
+type Load = {state: 'loading';} | {state: 'none';} | {state: 'found';teacher: Teacher;} | {state: 'error';message: string;};
 
 /**
- * The caller's own teacher profile (contract §6.1). Creating one grants no access: an institute
- * admin assigns the teacher by this profile's ID (§6.2), so the ID is shown with a copy button.
- * There is no read endpoint, so an existing profile is fetched with an empty update, which
- * changes nothing and returns the stored profile.
+ * The caller's own teacher profile. Read with GET /me/teacher-profile (contract §6.5): a 404 means
+ * there is no profile yet, so the create form is shown (POST, §6.1). Creating one grants no access:
+ * an institute admin assigns the teacher by this profile's ID (§6.2), so the ID has a copy button.
  */
 export function TeacherProfileCard() {
   const { account, refreshSession } = useAuth();
   const describe = useApiErrors();
-  const [teacher, setTeacher] = useState<Teacher | null>(null);
+  const [load, setLoad] = useState<Load>({ state: 'loading' });
+  const [reload, setReload] = useState(0);
   const [displayName, setDisplayName] = useState(account?.user.name ?? '');
   const [headline, setHeadline] = useState('');
   const [years, setYears] = useState('');
@@ -26,24 +28,25 @@ export function TeacherProfileCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const hasProfile = account?.has_teacher_profile ?? false;
+  const accountId = account?.user.uuid;
 
-  const run = async (action: () => Promise<Teacher>) => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      setTeacher(await action());
-      setErrors({});
-      if (!hasProfile) await refreshSession();
-    } catch (error) {
-      setErrors(fieldErrorsOf(error));
-      setMessage(describe(error));
-    } finally {
-      setBusy(false);
-    }
-  };
+  useEffect(() => {
+    let alive = true;
+    setLoad({ state: 'loading' });
+    teacherApi.
+    myProfile().
+    then((teacher) => alive && setLoad({ state: 'found', teacher })).
+    catch((error: unknown) => {
+      if (!alive) return;
+      if (error instanceof ApiError && error.status === 404) setLoad({ state: 'none' });else
+      setLoad({ state: 'error', message: describe(error) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [accountId, reload, describe]);
 
-  const create = (e: React.FormEvent) => {
+  const create = async (e: React.FormEvent) => {
     e.preventDefault();
     const local: Record<string, string> = {};
     const yearsValue = years.trim() === '' ? undefined : Number(years);
@@ -52,15 +55,24 @@ export function TeacherProfileCard() {
       local.years_experience = 'Enter a whole number of years from 0 to 70.';
     }
     setErrors(local);
+    setMessage(null);
     if (Object.keys(local).length > 0) return;
 
-    void run(() =>
-    teacherApi.saveMyProfile({
-      display_name: displayName.trim(),
-      ...(headline.trim() ? { headline: headline.trim() } : {}),
-      ...(yearsValue !== undefined ? { years_experience: yearsValue } : {})
-    })
-    );
+    setBusy(true);
+    try {
+      const teacher = await teacherApi.saveMyProfile({
+        display_name: displayName.trim(),
+        ...(headline.trim() ? { headline: headline.trim() } : {}),
+        ...(yearsValue !== undefined ? { years_experience: yearsValue } : {})
+      });
+      setLoad({ state: 'found', teacher });
+      await refreshSession();
+    } catch (error) {
+      setErrors(fieldErrorsOf(error));
+      setMessage(describe(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -79,25 +91,31 @@ export function TeacherProfileCard() {
       </div>
 
       <div className="mt-4 space-y-4">
-        {teacher ?
+        {load.state === 'loading' ?
+        <p role="status" className="text-small text-ink-soft">Loading your teacher profile…</p> :
+        load.state === 'error' ?
+        <div className="space-y-3">
+            <FormAlert message={load.message} />
+            <Button variant="secondary" size="sm" onClick={() => setReload((n) => n + 1)}>
+              Try again
+            </Button>
+          </div> :
+        load.state === 'found' ?
         <div className="rounded-xl border border-line bg-surface-muted px-4 py-3.5">
-            <p className="text-small font-medium text-ink">{teacher.display_name}</p>
-            {teacher.headline ? <p className="text-caption text-ink-soft">{teacher.headline}</p> : null}
+            <p className="text-small font-medium text-ink">{load.teacher.display_name}</p>
+            {load.teacher.headline ? <p className="text-caption text-ink-soft">{load.teacher.headline}</p> : null}
             <p className="mt-3 text-caption uppercase tracking-wide text-ink-faint">Your teacher ID</p>
-            <p className="mt-1 break-all font-mono text-small text-ink">{teacher.uuid}</p>
+            <p className="mt-1 break-all font-mono text-small text-ink">{load.teacher.uuid}</p>
             <div className="mt-3">
-              <CopyButton value={teacher.uuid} label="Copy teacher ID" />
+              <CopyButton value={load.teacher.uuid} label="Copy teacher ID" />
             </div>
             <p className="mt-2 text-caption text-ink-soft">
               Share it only with your institute’s admin, who uses it to assign you.
             </p>
           </div> :
-        hasProfile ?
-        <Button variant="secondary" disabled={busy} onClick={() => void run(() => teacherApi.saveMyProfile({}))}>
-            {busy ? 'Loading…' : 'Show my teacher ID'}
-          </Button> :
 
         <form onSubmit={create} className="space-y-4" noValidate>
+            <p className="text-small text-ink-soft">You don’t have a teacher profile yet.</p>
             <div>
               <Label htmlFor="tp-name">Name shown to students</Label>
               <TextInput
@@ -138,12 +156,12 @@ export function TeacherProfileCard() {
                 <FieldError id="tp-years-error" message={errors.years_experience} />
               </div>
             </div>
+            <FormAlert message={message} />
             <Button type="submit" disabled={busy}>
               {busy ? 'Creating…' : 'Create teacher profile'}
             </Button>
           </form>
         }
-        <FormAlert message={message} />
       </div>
     </section>);
 
