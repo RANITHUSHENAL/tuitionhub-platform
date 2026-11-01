@@ -215,9 +215,9 @@ export const roleLabel: Record<Role, string> = {
 };
 
 export const roleSummary: Record<Role, string> = {
-  student: 'View classes, attendance, marks and Study.',
+  student: 'View classes and attendance.',
   parent: 'Manage children, fees and progress.',
-  teacher: 'Manage your classes, attendance, marks and exams.',
+  teacher: 'Manage your classes and attendance.',
   institute: 'Run classes, students, teachers and fees.'
 };
 

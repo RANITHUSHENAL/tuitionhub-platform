@@ -73,8 +73,8 @@ export function ParentFees() {
               <div className="flex gap-2.5 rounded-xl bg-surface-muted px-4 py-3">
                 <ShieldCheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-forest" aria-hidden="true" />
                 <p className="max-w-xs text-caption text-ink-soft">
-                  A 2% platform fee is shown separately before you confirm — the
-                  institute receives the full class fee.
+                  The TuitionHub fee is shown separately before you confirm — the
+                  full class fee is owed to the institute.
                 </p>
               </div>
             </div>
@@ -198,7 +198,7 @@ export function ParentFees() {
           <>
                 <dl className="space-y-2 text-small">
                   <Row label="Class fee" value={lkr(active.amount)} />
-                  <Row label="Platform fee (2%)" value={lkr(active.platformFee)} />
+                  <Row label="TuitionHub fee" value={lkr(active.platformFee)} />
                   <Row
                 label="Total"
                 value={lkr(active.amount + active.platformFee)}
@@ -247,8 +247,7 @@ export function ParentFees() {
                     {lkr(active.amount + active.platformFee)} paid to {active.institute}
                   </p>
                   <p className="mt-1 text-caption text-ink-soft">
-                    Reference TH-5A18-2026 · settles to the institute on the next
-                    working day.
+                    Reference TH-5A18-2026.
                   </p>
                 </div>
                 <div className="flex gap-2">

@@ -26,14 +26,7 @@ const columns = [
   { to: '/institute', label: 'Institute dashboard' },
   { to: '/institute/classes', label: 'Classes' },
   { to: '/institute/attendance', label: 'Attendance' },
-  { to: '/institute/fees', label: 'Fees & settlements' }]
-
-},
-{
-  title: 'Product',
-  links: [
-  { to: '/blueprint', label: 'Product blueprint' },
-  { to: '/design-system', label: 'Design system' }]
+  { to: '/institute/fees', label: 'Fees & payments' }]
 
 }];
 
@@ -42,7 +35,7 @@ export function SiteFooter() {
   return (
     <footer className="border-t border-line bg-surface-muted">
       <div className="mx-auto max-w-[1200px] px-5 py-12 lg:px-8">
-        <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(4,1fr)]">
+        <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
             <p className="text-h3 font-bold tracking-tight text-ink">
               Tuition<span className="text-forest">Hub</span>
@@ -77,7 +70,6 @@ export function SiteFooter() {
         </div>
         <div className="mt-10 flex flex-col gap-2 border-t border-line pt-6 text-caption text-ink-faint sm:flex-row sm:items-center sm:justify-between">
           <span>TuitionHub · Sri Lanka · සිංහල | தமிழ் | English</span>
-          <span>Support line and settlement schedule shown in the institute portal.</span>
         </div>
       </div>
     </footer>);

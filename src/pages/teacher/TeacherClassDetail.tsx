@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { LayersIcon, PlusIcon, SearchIcon } from 'lucide-react';
+import { LayersIcon, SearchIcon } from 'lucide-react';
 import { TeacherShell } from '../../components/teacher/TeacherShell';
 import { SessionAttendance } from '../../components/teacher/SessionAttendance';
-import { MarksEntry } from '../../components/teacher/MarksEntry';
 import { ClassAnnouncementForm } from '../../components/teacher/ClassAnnouncementForm';
 import { Avatar } from '../../components/ui/Avatar';
 import { Badge } from '../../components/ui/Badge';
@@ -16,7 +15,8 @@ import { initialsOf } from '../../utils/format';
 
 export function TeacherClassDetail() {
   const { id = '' } = useParams();
-  const { myClasses, myExams, mySessions } = useTeacherScope();
+  // Marks and Exams tabs are hidden (out of sprint scope); their components are kept.
+  const { myClasses, mySessions } = useTeacherScope();
   const cls = myClasses.find((c) => c.id === id);
   const [tab, setTab] = useState('students');
   const [query, setQuery] = useState('');
@@ -35,7 +35,6 @@ export function TeacherClassDetail() {
   }
 
   const session = mySessions.find((s) => s.classId === cls.id);
-  const exams = myExams.filter((e) => e.className === cls.name);
   const students = classStudents.filter((s) => s.name.toLowerCase().includes(query.toLowerCase()));
 
   return (
@@ -47,8 +46,6 @@ export function TeacherClassDetail() {
         items={[
         { id: 'students', label: 'Students', count: cls.students },
         { id: 'attendance', label: 'Attendance' },
-        { id: 'marks', label: 'Marks' },
-        { id: 'exams', label: 'Exams', count: exams.length },
         { id: 'announce', label: 'Announcements' }]
         } />
       
@@ -80,7 +77,7 @@ export function TeacherClassDetail() {
             )}
             </ul>
             <p className="border-t border-line px-5 py-3 text-caption text-ink-faint">
-              Showing a sample of {classStudents.length}. You see names, attendance and marks — guardian
+              Showing a sample of {classStudents.length}. You see names and attendance — guardian
               contact details and fees stay with {cls.workspaceId === 'ws-independent' ? 'you in Payments' : 'the institute'}.
             </p>
           </section> :
@@ -92,36 +89,6 @@ export function TeacherClassDetail() {
           sessionMeta={`${cls.name} · ${cls.place}`}
           initialStage={session?.state === 'done' ? 'closed' : 'ready'} /> :
 
-        null}
-
-        {tab === 'marks' ? <MarksEntry classes={myClasses} fixedClassId={cls.id} /> : null}
-
-        {tab === 'exams' ?
-        <section className="space-y-3">
-            <div className="flex justify-end">
-              <LinkButton to={`/teacher/exams/new?class=${cls.id}`} size="sm">
-                <PlusIcon className="h-4 w-4" />
-                Create exam for this class
-              </LinkButton>
-            </div>
-            {exams.length ?
-          exams.map((e) =>
-          <div key={e.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white px-5 py-4">
-                  <div>
-                    <p className="text-small font-medium text-ink">{e.title}</p>
-                    <p className="text-caption text-ink-soft">
-                      {e.windowLabel} · {e.submissions ?? 0} submissions
-                    </p>
-                  </div>
-                  <Badge tone={e.status === 'open' ? 'success' : 'neutral'}>{e.status}</Badge>
-                </div>
-          ) :
-
-          <p className="rounded-2xl border border-dashed border-line-strong px-5 py-8 text-center text-small text-ink-soft">
-                No exams for this class yet.
-              </p>
-          }
-          </section> :
         null}
 
         {tab === 'announce' ? <ClassAnnouncementForm classes={myClasses} fixedClassId={cls.id} /> : null}

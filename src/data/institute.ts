@@ -11,9 +11,7 @@ export const instituteStats = {
   attendanceToday: 86,
   attendanceMarked: 5,
   collectedThisMonth: 3186000,
-  outstanding: 412000,
-  settledYesterday: 268400,
-  nextSettlement: 'Tomorrow, 9:00 AM'
+  outstanding: 412000
 };
 
 export const todaysClasses = [
@@ -78,13 +76,13 @@ export const roster = [
 
 export const teacherActivity = [
 { id: 'ta-1', teacher: 'Mr. R. Jayasinghe', action: 'Marked attendance', target: 'Combined Maths · 79 of 84', time: '12 min ago' },
-{ id: 'ta-2', teacher: 'Mrs. S. Fernando', action: 'Entered marks', target: 'O/L Maths Paper 6', time: '1 hour ago' },
 { id: 'ta-3', teacher: 'Ms. P. Silva', action: 'Published announcement', target: 'Speaking groups reshuffled', time: '3 hours ago' },
 { id: 'ta-4', teacher: 'Mr. N. Perera', action: 'Added online link', target: 'A/L Physics · tonight', time: '4 hours ago' }];
 
 
-export const settlements = [
-{ id: 'st-1', date: '19 Mar 2026', collected: 268400, fee: 5368, net: 263032, status: 'paid' as const },
-{ id: 'st-2', date: '18 Mar 2026', collected: 192000, fee: 3840, net: 188160, status: 'paid' as const },
-{ id: 'st-3', date: '17 Mar 2026', collected: 341600, fee: 6832, net: 334768, status: 'paid' as const },
-{ id: 'st-4', date: '20 Mar 2026', collected: 154200, fee: 3084, net: 151116, status: 'processing' as const }];
+/** Sample daily totals: paid by parents, TuitionHub fee, and the amount owed to the institute (not a payout). */
+export const dailyPayments = [
+{ id: 'dp-4', date: '20 Mar 2026', collected: 154200, fee: 3084, net: 151116 },
+{ id: 'dp-1', date: '19 Mar 2026', collected: 268400, fee: 5368, net: 263032 },
+{ id: 'dp-2', date: '18 Mar 2026', collected: 192000, fee: 3840, net: 188160 },
+{ id: 'dp-3', date: '17 Mar 2026', collected: 341600, fee: 6832, net: 334768 }];

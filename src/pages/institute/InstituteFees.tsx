@@ -1,10 +1,10 @@
 import React from 'react';
-import { DownloadIcon, InfoIcon } from 'lucide-react';
+import { DownloadIcon } from 'lucide-react';
 import { AppShell } from '../../components/app/AppShell';
 import { instituteNav } from '../../components/app/navConfig';
-import { Badge, PaymentBadge } from '../../components/ui/Badge';
+import { PaymentBadge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { institute, instituteStats, roster, settlements } from '../../data/institute';
+import { dailyPayments, institute, instituteStats, roster } from '../../data/institute';
 import { lkr } from '../../utils/format';
 
 export function InstituteFees() {
@@ -17,8 +17,8 @@ export function InstituteFees() {
       accountDetail={institute.branch}
       initials="SA"
       nav={instituteNav}
-      title="Fees & settlements"
-      subtitle="What was collected, what is owed, and when it reaches your account"
+      title="Fees & payments"
+      subtitle="What parents paid and what is still outstanding"
       actions={
       <Button variant="secondary" size="sm">
           <DownloadIcon className="h-4 w-4" />
@@ -28,37 +28,32 @@ export function InstituteFees() {
       
       <div className="grid gap-6 xl:grid-cols-[1.4fr_0.6fr]">
         <div className="space-y-6">
-          <section className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-3">
+          <section className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2">
             <Metric label="Collected this month" value={lkr(instituteStats.collectedThisMonth)} detail="1,246 payments" />
             <Metric label="Outstanding" value={lkr(instituteStats.outstanding)} detail="38 students" />
-            <Metric label="Settled yesterday" value={lkr(instituteStats.settledYesterday)} detail="Ref STL-0319" />
           </section>
 
+          {/* C3: amounts owed to the institute are shown without any payout or settlement date. */}
           <section className="overflow-hidden rounded-2xl border border-line bg-white shadow-card">
-            <div className="flex items-center justify-between gap-3 border-b border-line px-6 py-4">
-              <h2 className="text-h3 text-ink">Settlements</h2>
-              <Badge tone="neutral">Next working day</Badge>
+            <div className="border-b border-line px-6 py-4">
+              <h2 className="text-h3 text-ink">Payments by day</h2>
             </div>
             <table className="w-full min-w-[40rem] text-left">
               <thead className="border-b border-line bg-surface-muted">
                 <tr className="text-caption uppercase tracking-wide text-ink-faint">
                   <th scope="col" className="px-6 py-3 font-medium">Date</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Collected</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Platform fee</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Net to institute</th>
-                  <th scope="col" className="px-6 py-3 font-medium">Status</th>
+                  <th scope="col" className="px-6 py-3 font-medium">Paid by parents</th>
+                  <th scope="col" className="px-6 py-3 font-medium">TuitionHub fee</th>
+                  <th scope="col" className="px-6 py-3 font-medium">Owed to institute</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line text-small">
-                {settlements.map((s) =>
+                {dailyPayments.map((s) =>
                 <tr key={s.id}>
                     <td className="px-6 py-4 text-ink">{s.date}</td>
                     <td className="px-6 py-4 text-ink-soft">{lkr(s.collected)}</td>
                     <td className="px-6 py-4 text-ink-soft">{lkr(s.fee)}</td>
                     <td className="px-6 py-4 font-medium text-ink">{lkr(s.net)}</td>
-                    <td className="px-6 py-4">
-                      <PaymentBadge status={s.status} />
-                    </td>
                   </tr>
                 )}
               </tbody>
@@ -95,29 +90,20 @@ export function InstituteFees() {
             <h2 className="text-h3 text-ink">How the money moves</h2>
             <ol className="mt-4 space-y-4 text-small text-ink-soft">
               <Step n={1} title="Parent pays">
-                The class fee plus a 2% platform fee, shown separately.
+                The class fee plus the TuitionHub fee, shown separately before paying.
               </Step>
               <Step n={2} title="Recorded against the enrolment">
                 The payment is tied to one student, one class, one month.
               </Step>
-              <Step n={3} title="Settled to you">
-                Net of the platform fee, on the next working day, with a reference.
+              <Step n={3} title="Owed to your institute">
+                The class fee is recorded as owed to your institute. The TuitionHub fee
+                is kept separate.
               </Step>
               <Step n={4} title="Reconciled">
                 Daily report of in, out, pending and refunded — exportable for your
                 accountant.
               </Step>
             </ol>
-          </section>
-
-          <section className="rounded-2xl border border-line bg-surface-muted p-6">
-            <div className="flex gap-2.5">
-              <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" aria-hidden="true" />
-              <p className="text-caption text-ink-soft">
-                Bank holidays pause settlement. The schedule shows the next working day
-                so you can plan teacher payouts around it.
-              </p>
-            </div>
           </section>
         </aside>
       </div>

@@ -142,7 +142,7 @@ function ProofPanel() {
             icon={<BanknoteIcon className="h-4.5 w-4.5" />}
             label="March fees"
             headline="LKR 6,200 paid to Sarasavi Academy"
-            detail="Settled to the institute on 4 March · receipt TH-3F91" />
+            detail="Paid on 4 March · receipt TH-3F91" />
           
         </ul>
 

@@ -50,7 +50,6 @@ export const teacherSessions: TeacherSession[] = [
 
 
 export const teacherActivity = [
-{ id: 'ta-1', text: '18 new submissions — Physics Waves Unit Test', time: '12 min ago', to: '/teacher/exams' },
 { id: 'ta-2', text: 'Attendance closed — O/L Science, 11 of 12 present', time: '2 h ago', to: '/teacher/attendance' },
 { id: 'ta-3', text: 'Your announcement “Bring the 2025 paper” reached 32 students and their guardians', time: 'Yesterday', to: '/teacher/announcements' }];
 
@@ -69,8 +68,8 @@ export const teacherRequests = [
 export type InstituteMemberRole = 'Owner' | 'Manager' | 'Staff' | 'Teacher';
 
 export const instituteTeam: {id: string;name: string;role: InstituteMemberRole;subject?: string;classes: number;access: string;}[] = [
-{ id: 'm-1', name: 'Mrs. K. Rajapaksha', role: 'Owner', classes: 0, access: 'Whole institute, including settlements' },
-{ id: 'm-2', name: 'Mr. S. Dias', role: 'Manager', classes: 0, access: 'Classes, students, fees — no settlement changes' },
+{ id: 'm-1', name: 'Mrs. K. Rajapaksha', role: 'Owner', classes: 0, access: 'Whole institute, including fees and payments' },
+{ id: 'm-2', name: 'Mr. S. Dias', role: 'Manager', classes: 0, access: 'Classes, students and fee follow-up' },
 { id: 'm-3', name: 'Ms. H. Nanayakkara', role: 'Staff', classes: 0, access: 'Front desk: enrolments, manual attendance' },
 { id: 'm-4', name: 'Mr. N. Perera', role: 'Teacher', subject: 'Physics', classes: 2, access: 'Assigned classes only' },
 { id: 'm-5', name: 'Mr. R. Jayasinghe', role: 'Teacher', subject: 'Combined Maths', classes: 1, access: 'Assigned classes only' },

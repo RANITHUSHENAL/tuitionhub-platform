@@ -21,7 +21,7 @@ export function TeacherPayments() {
           <div className="bg-white px-6 py-5">
             <dt className="text-caption text-ink-faint">Collected this month</dt>
             <dd className="mt-1 text-h1 text-ink">{lkr(paid)}</dd>
-            <p className="mt-1 text-caption text-ink-soft">Settled to your bank account the next working day</p>
+            <p className="mt-1 text-caption text-ink-soft">Paid by guardians for your classes</p>
           </div>
           <div className="bg-white px-6 py-5">
             <dt className="text-caption text-ink-faint">Still due</dt>

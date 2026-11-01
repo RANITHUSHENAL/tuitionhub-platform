@@ -12,18 +12,8 @@ const week = [
   { title: 'A/L Physics — Theory', time: '6:00 PM', place: 'Nugegoda Hall B', kind: 'Class' }]
 
 },
-{
-  day: 'Wednesday',
-  items: [
-  { title: 'Waves Study Session', time: '6:00 PM', place: 'Near Nugegoda', kind: 'Study' }]
-
-},
-{
-  day: 'Thursday',
-  items: [
-  { title: 'Integration Practice', time: '5:00 PM', place: 'Near Pannipitiya', kind: 'Study' }]
-
-},
+{ day: 'Wednesday', items: [] },
+{ day: 'Thursday', items: [] },
 {
   day: 'Friday',
   items: [
@@ -48,7 +38,7 @@ export function StudentSchedule() {
       initials={studentProfile.initials}
       nav={studentNav}
       title="Schedule"
-      subtitle="Classes and study sessions in one week view">
+      subtitle="Your classes in one week view">
       
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {week.map((d) =>

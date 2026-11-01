@@ -163,8 +163,8 @@ export const announcements: Announcement[] = [
 },
 {
   id: 'ann-2',
-  title: 'Model paper 4 marks released',
-  body: 'Physics model paper 4 marks are now visible under Marks. Paper collection from Tuesday.',
+  title: 'Model paper 4 discussion on Tuesday',
+  body: 'We will go through Physics model paper 4 together. Paper collection from Tuesday.',
   from: 'Mr. N. Perera',
   time: 'Yesterday',
   channel: 'App'

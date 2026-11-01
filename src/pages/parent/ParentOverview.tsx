@@ -11,7 +11,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   announcements,
   invoices,
-  marks,
   parentProfile,
   upcomingSessions } from
 '../../data/people';
@@ -49,7 +48,7 @@ export function ParentOverview() {
             <section className="rounded-2xl border border-line bg-surface-muted p-6">
               <h2 className="text-h3 text-ink">After you connect a child</h2>
               <p className="mt-2 text-small text-ink-soft">
-                This page shows their next class, attendance, latest marks and any fees due —
+                This page shows their next class, attendance and any fees due —
                 for every child you add.
               </p>
             </section>
@@ -62,7 +61,6 @@ export function ParentOverview() {
   const child = parentProfile.children[childIndex];
   const due = invoices.filter((i) => i.status === 'pending' || i.status === 'failed');
   const nextSession = upcomingSessions[0];
-  const latestMark = marks[0];
 
   return (
     <AppShell
@@ -103,14 +101,9 @@ export function ParentOverview() {
               <Badge tone="neutral">{child.classesEnrolled} classes enrolled</Badge>
             </div>
 
-            <div className="grid gap-px bg-line sm:grid-cols-3">
+            <div className="grid gap-px bg-line sm:grid-cols-2">
               <Stat label="Next class" value={nextSession.className.split('—')[0].trim()} detail={nextSession.when} />
               <Stat label="Attendance this term" value={`${child.attendanceRate}%`} detail="2 sessions missed" />
-              <Stat
-                label="Latest result"
-                value={`${latestMark.score} / ${latestMark.outOf}`}
-                detail={`${latestMark.assessment} · avg ${latestMark.classAverage}`} />
-              
             </div>
           </section>
 
@@ -197,8 +190,8 @@ export function ParentOverview() {
           <section className="rounded-2xl border border-line bg-surface-muted p-6">
             <h2 className="text-h3 text-ink">How TuitionHub shows information</h2>
             <p className="mt-2 text-small text-ink-soft">
-              You see attendance, marks and payments for the classes you pay for. You do
-              not see your child's location, messages, or Study activity.
+              You see attendance and payments for the classes you pay for. You do not
+              see your child's location.
             </p>
             <PrototypeNote>
               Children, classes and figures on this account are fictional.

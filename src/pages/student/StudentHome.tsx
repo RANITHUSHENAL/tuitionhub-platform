@@ -5,13 +5,10 @@ import { AppShell } from '../../components/app/AppShell';
 import { studentNav } from '../../components/app/navConfig';
 import { GuardianBanner } from '../../components/student/GuardianBanner';
 import { ClassCard } from '../../components/cards/ClassCard';
-import { Badge } from '../../components/ui/Badge';
-import { LinkButton } from '../../components/ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { classById } from '../../data/classes';
 import { myClassIds, recommended, sponsored } from '../../data/feed';
-import { exams } from '../../data/exams';
-import { announcements, marks, upcomingSessions } from '../../data/people';
+import { announcements, upcomingSessions } from '../../data/people';
 
 /**
  * Signed-in student home: a personalised education feed. Fixed order, no
@@ -21,7 +18,6 @@ export function StudentHome() {
   const { user } = useAuth();
   const first = user?.name.split(' ')[0] ?? 'there';
   const next = upcomingSessions[0];
-  const openExam = exams.find((e) => e.status === 'open');
 
   return (
     <AppShell
@@ -37,7 +33,7 @@ export function StudentHome() {
         <GuardianBanner />
 
         {/* Next class */}
-        <section aria-labelledby="next-class" className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr]">
+        <section aria-labelledby="next-class">
           <div className="rounded-2xl border border-line bg-forest p-6 text-white shadow-card">
             <p id="next-class" className="text-caption uppercase tracking-wide text-forest-100">
               Next class
@@ -59,18 +55,6 @@ export function StudentHome() {
               </Link>
             </div>
           </div>
-          {openExam ?
-          <div className="flex flex-col rounded-2xl border border-line bg-white p-6 shadow-card">
-              <p className="text-caption uppercase tracking-wide text-ink-faint">Exam open</p>
-              <h3 className="mt-1.5 text-h3 text-ink">{openExam.title}</h3>
-              <p className="mt-1 text-caption text-ink-soft">
-                {openExam.durationMins} min · {openExam.totalMarks} marks · {openExam.windowLabel}
-              </p>
-              <LinkButton to={`/student/exams/${openExam.id}`} size="sm" className="mt-auto self-start">
-                Start exam
-              </LinkButton>
-            </div> :
-          null}
         </section>
 
         {/* Recommended */}
@@ -123,33 +107,6 @@ export function StudentHome() {
                   <p className="mt-1 text-caption text-ink-faint">
                     {a.from} · {a.time}
                   </p>
-                </li>
-              )}
-            </ul>
-          </section>
-
-          {/* Results */}
-          <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-            <div className="flex items-center justify-between">
-              <h2 className="text-h3 text-ink">Latest results</h2>
-              <Link to="/student/marks" className="text-small font-medium text-forest">
-                All results
-              </Link>
-            </div>
-            <ul className="mt-4 divide-y divide-line">
-              {marks.slice(0, 3).map((m) =>
-              <li key={m.id} className="flex items-center justify-between gap-3 py-3">
-                  <div>
-                    <p className="text-small font-medium text-ink">{m.assessment}</p>
-                    <p className="text-caption text-ink-soft">{m.date}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-h3 text-ink">
-                      {m.score}
-                      <span className="text-ink-faint"> / {m.outOf}</span>
-                    </p>
-                    <Badge tone={m.score >= m.classAverage ? 'success' : 'warn'}>avg {m.classAverage}</Badge>
-                  </div>
                 </li>
               )}
             </ul>

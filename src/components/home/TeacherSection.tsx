@@ -3,7 +3,7 @@ import { BuildingIcon, CheckIcon, ClipboardCheckIcon, FileQuestionIcon, Megaphon
 import { LinkButton } from '../ui/Button';
 import { Badge } from '../ui/Badge';
 
-const independent = ['Create your own classes and list them publicly', 'Set schedules and fees', 'Collect payments, settled to you', 'Attendance, marks, exams and announcements'];
+const independent = ['Create your own classes and list them publicly', 'Set schedules and fees', 'Track payments for your classes', 'Attendance, marks, exams and announcements'];
 const institute = ['Request to join your institute — they approve', 'See only the classes assigned to you', 'Mark attendance, enter marks, set exams', 'The institute keeps fees and admin'];
 
 /** Teachers as a first-class stakeholder, independent of institutes. */

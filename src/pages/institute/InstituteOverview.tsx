@@ -74,33 +74,20 @@ export function InstituteOverview() {
           </section>
 
           <section className="rounded-2xl border border-line bg-white p-6 shadow-card">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p className="text-caption uppercase tracking-wide text-ink-faint">
-                  Collected this month
-                </p>
-                <p className="mt-1 text-display text-ink">{lkr(instituteStats.collectedThisMonth)}</p>
-                <p className="mt-1 text-small text-ink-soft">
-                  88% of billed fees · {lkr(instituteStats.outstanding)} outstanding
-                </p>
-              </div>
-              <div className="rounded-xl border border-line px-4 py-3">
-                <p className="text-caption uppercase tracking-wide text-ink-faint">
-                  Next settlement
-                </p>
-                <p className="mt-0.5 text-small font-medium text-ink">
-                  {instituteStats.nextSettlement}
-                </p>
-                <p className="text-caption text-ink-soft">
-                  {lkr(instituteStats.settledYesterday)} settled yesterday
-                </p>
-              </div>
+            <div>
+              <p className="text-caption uppercase tracking-wide text-ink-faint">
+                Collected this month
+              </p>
+              <p className="mt-1 text-display text-ink">{lkr(instituteStats.collectedThisMonth)}</p>
+              <p className="mt-1 text-small text-ink-soft">
+                88% of billed fees · {lkr(instituteStats.outstanding)} outstanding
+              </p>
             </div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-sunk">
               <div className="h-full w-[88%] rounded-full bg-forest" />
             </div>
             <LinkButton to="/institute/fees" variant="secondary" size="sm" className="mt-5">
-              Fees & settlements
+              Fees & payments
               <ArrowUpRightIcon className="h-4 w-4" />
             </LinkButton>
           </section>
@@ -126,7 +113,6 @@ export function InstituteOverview() {
             <h2 className="text-h3 text-ink">You stay in control</h2>
             <ul className="mt-3 space-y-2 text-small text-ink-soft">
               <li>Public listings are attributed to the institute; teacher names are optional.</li>
-              <li>Settlements land in your account on the next working day.</li>
               <li>Full export of students, attendance and payments, any time.</li>
             </ul>
             <div className="mt-4">

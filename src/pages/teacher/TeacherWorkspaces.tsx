@@ -103,14 +103,14 @@ export function TeacherWorkspaces() {
             <div>
               <p className="text-small font-medium text-ink">Institute teacher</p>
               <p className="mt-1 text-caption text-ink-soft">
-                Your assigned classes, their students, attendance, marks and exams. Not
-                institute fees, settlements, other teachers’ classes, or guardian contact details.
+                Your assigned classes, their students and attendance. Not institute
+                fees, other teachers’ classes, or guardian contact details.
               </p>
             </div>
             <div>
               <p className="text-small font-medium text-ink">Independent</p>
               <p className="mt-1 text-caption text-ink-soft">
-                Everything for classes you create — including fees and payments, settled to you.
+                Everything for classes you create — including fees and payments.
               </p>
             </div>
           </div>

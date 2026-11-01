@@ -39,7 +39,6 @@ import { StudentExams } from './pages/student/StudentExams';
 import { ExamTake } from './pages/student/ExamTake';
 import { StudentMarks } from './pages/student/StudentMarks';
 import { StudentProfile } from './pages/student/StudentProfile';
-import { ConnectGuardian } from './pages/student/ConnectGuardian';
 import { InstituteOverview } from './pages/institute/InstituteOverview';
 import { InstituteClasses } from './pages/institute/InstituteClasses';
 import { InstituteStudents } from './pages/institute/InstituteStudents';
@@ -94,7 +93,7 @@ export function App() {
 
           {/* Study and Messages are out of sprint scope (C7): files kept, direct URLs go home. */}
           <Route path="/study/*" element={<Navigate to="/" replace />} />
-          <Route path="/messages" element={<Navigate to="/" replace />} />
+          <Route path="/messages/*" element={<Navigate to="/" replace />} />
 
           <Route path="/student" element={student(<StudentHome />)} />
           <Route path="/student/schedule" element={student(<StudentSchedule />)} />
@@ -103,7 +102,9 @@ export function App() {
           <Route path="/student/exams/:id" element={student(<ExamTake />)} />
           <Route path="/student/marks" element={student(<StudentMarks />)} />
           <Route path="/student/profile" element={student(<StudentProfile />)} />
-          <Route path="/student/connect-guardian" element={student(<ConnectGuardian />, 'connect')} />
+          {/* C6: the institute registers students and parents link by invitation code, so the
+              student-initiated linking screen is retired (file kept). */}
+          <Route path="/student/connect-guardian" element={<Navigate to="/student" replace />} />
 
           <Route path="/parent" element={parent(<ParentOverview />)} />
           <Route path="/parent/family" element={parent(<ParentFamily />, 'connect')} />

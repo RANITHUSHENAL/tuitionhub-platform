@@ -4,8 +4,7 @@ import {
   CalendarCheckIcon,
   GraduationCapIcon,
   SearchIcon,
-  UserPlusIcon,
-  UsersIcon } from
+  UserPlusIcon } from
 'lucide-react';
 
 const journey = [
@@ -13,15 +12,14 @@ const journey = [
 { icon: UserPlusIcon, title: 'Join', body: 'Enrol online. The institute or teacher confirms the seat.' },
 { icon: CalendarCheckIcon, title: 'Attend', body: 'Scan the session QR at the hall, or join the online link.' },
 { icon: GraduationCapIcon, title: 'Track progress', body: 'Marks and exam results land on the same enrolment.' },
-{ icon: BanknoteIcon, title: 'Pay', body: 'The invoice names the class and who receives the money.' },
-{ icon: UsersIcon, title: 'Study with others', body: 'Join study sessions with students learning the same thing.' }];
+{ icon: BanknoteIcon, title: 'Pay', body: 'The invoice names the class and who receives the money.' }];
 
 
 const responsibilities = [
 { area: 'Attendance', teacher: 'Marks it each session', student: 'Scans the session QR', parent: 'Sees it, or gets an SMS', institute: 'Reviews the overview' },
 { area: 'Marks & exams', teacher: 'Sets papers, enters marks', student: 'Takes exams, sees results', parent: 'Sees published results', institute: 'Oversees results' },
 { area: 'Announcements', teacher: 'Posts to their class', student: 'Receives', parent: 'Receives', institute: 'Posts institute-wide' },
-{ area: 'Fees', teacher: 'Independent teachers collect', student: '—', parent: 'Pays, gets a receipt', institute: 'Collects, settles, reconciles' }];
+{ area: 'Fees', teacher: 'Independent teachers collect', student: '—', parent: 'Pays, gets a receipt', institute: 'Collects and reconciles' }];
 
 
 export function EcosystemSection() {
@@ -31,7 +29,7 @@ export function EcosystemSection() {
         <p className="text-caption font-medium uppercase tracking-wide text-clay">How TuitionHub works</p>
         <h2 className="mt-2 max-w-3xl text-h1 text-ink">From the first search to the last payment, one record.</h2>
 
-        <ol className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-6">
+        <ol className="mt-10 grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-2 lg:grid-cols-5">
           {journey.map((s, i) =>
           <li key={s.title} className={`flex flex-col p-5 ${i === journey.length - 1 ? 'bg-forest-50' : 'bg-white'}`}>
               <span className="text-caption font-medium text-ink-faint">{i + 1}</span>

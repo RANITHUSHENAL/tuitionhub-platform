@@ -10,8 +10,8 @@ const assurances = [
   body: 'Classes are listed under your institute. Teacher names are shown publicly only if you switch it on.'
 },
 {
-  title: 'Money settles to you daily',
-  body: 'Collections are settled to the institute account on the next working day, with an exportable reconciliation report.'
+  title: 'See what is paid and what is owed',
+  body: 'Each payment shows the class fee owed to your institute and the TuitionHub fee separately, with an exportable reconciliation report.'
 },
 {
   title: 'Add it alongside what you have',
@@ -26,7 +26,7 @@ export function InstituteSection() {
         <SectionHeading
           eyebrow="For institutes"
           title="Run your institute more efficiently"
-          body="Classes, students, teachers, fees and payments in one place. Your teachers mark attendance and set exams for their own classes; you get the overview, the reports and the settlements."
+          body="Classes, students, teachers, fees and payments in one place. Your teachers mark attendance and set exams for their own classes; you get the overview and the reports."
           action={
           <LinkButton to="/auth?role=institute" variant="secondary">
               Institute sign-in
@@ -61,12 +61,9 @@ export function InstituteSection() {
             </div>
 
             <div className="px-6 py-5">
-              <div className="flex items-center justify-between">
-                <p className="text-caption uppercase tracking-wide text-ink-faint">
-                  Collected this month
-                </p>
-                <p className="text-caption text-ink-soft">Next settlement: tomorrow 9:00 AM</p>
-              </div>
+              <p className="text-caption uppercase tracking-wide text-ink-faint">
+                Collected this month
+              </p>
               <p className="mt-1.5 text-h1 text-ink">{lkr(3186000)}</p>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-sunk">
                 <div className="h-full w-[88%] rounded-full bg-forest" />

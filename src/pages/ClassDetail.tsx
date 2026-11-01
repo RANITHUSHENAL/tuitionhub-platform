@@ -213,7 +213,7 @@ export function ClassDetail() {
               <div className="mt-5 flex gap-2.5 rounded-xl bg-surface-muted px-3.5 py-3">
                 <ShieldCheckIcon className="mt-0.5 h-4 w-4 shrink-0 text-forest" aria-hidden="true" />
                 <p className="text-caption text-ink-soft">
-                  Fees paid here are recorded against this enrolment and settled to{' '}
+                  Fees paid here are recorded against this enrolment and owed to{' '}
                   {item.institute}. You can see the receipt in Fees &amp; payments.
                 </p>
               </div>
