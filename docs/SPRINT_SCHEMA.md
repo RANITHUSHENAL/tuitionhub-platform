@@ -1007,7 +1007,7 @@ All items were approved by Ranithu Shenal on 2026-10-28 (D-015). The two pre-lau
 
 # Part 3 — R3: G5 Classes and G6 Attendance (DRAFT)
 
-**Status:** **APPROVED (D-024) by TuitionHub founders on 2026-11-01. Not yet migrated.** Prepared 2026-11-01 on `sprint/day1-api-scaffold` (baseline `ca3d8a9`). M3 (the migrations) is a separate task; its first runs go only to `tuitionhub_test` (§0.B, D-010), and applying it to `tuitionhub` needs its own approval.
+**Status:** **APPROVED (D-024) by TuitionHub founders on 2026-11-01. Migrated: M3 verified on `tuitionhub_test` (D-025) and applied to the development database `tuitionhub` on 2026-11-01 (batch 3).** Prepared 2026-11-01 on `sprint/day1-api-scaffold` (baseline `ca3d8a9`).
 
 - **Sources, highest first:**
   - contract v0.7: §7 classes, §8.3–§8.4 enrolments, §10 sessions and attendance, §11.2 fee selection, §13 audit;

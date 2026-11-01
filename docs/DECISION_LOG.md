@@ -621,9 +621,9 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Tests:** 86 new; `php artisan test` → **452 passed** (366 existing unchanged + 86). Unit (codes, normalisation, key, redaction; 9), create (17), accept (22), revoke invitation (12, including an unknown query field), revoke link (11), children (6), lock order and re-authorization (9).
 - **Open / not done:** real two-process concurrency (E2c; VP-42 is tested sequentially, the locks and unique keys are the backstop); guardian access for §10.5 and §11 comes with those endpoints; `active_enrollments` with the enrolment tables; in `log` OTP mode `phone_verified_at` is not real phone verification (C6); the D-022 items (L1, production `zend.exception_ignore_args=On`, trusted proxies) are unchanged.
 
-## D-024 — R3 schema for G5 classes and G6 attendance — **APPROVED by TuitionHub founders (2026-11-01); not yet migrated**
+## D-024 — R3 schema for G5 classes and G6 attendance — **APPROVED by TuitionHub founders (2026-11-01); applied to `tuitionhub` 2026-11-01 (batch 3)**
 
-- **Scope:** `docs/SPRINT_SCHEMA.md` Part 3 becomes the migration specification for `classes`, `class_fee_versions`, `class_sessions`, `class_enrollments` and `attendances` (M3: migrations `2026_10_29_000014`–`000018`). Contract → **v0.7.1**. Approved in the R3 corrections brief on 2026-11-01; Q38–Q56 are all **Decided (D-024)**. Nothing is migrated yet. M3 runs first only on `tuitionhub_test`, and applying it to `tuitionhub` needs its own approval.
+- **Scope:** `docs/SPRINT_SCHEMA.md` Part 3 becomes the migration specification for `classes`, `class_fee_versions`, `class_sessions`, `class_enrollments` and `attendances` (M3: migrations `2026_10_29_000014`–`000018`). Contract → **v0.7.1**. Approved in the R3 corrections brief on 2026-11-01; Q38–Q56 are all **Decided (D-024)**. M3 ran first only on `tuitionhub_test` (D-025). It was then applied to the development database `tuitionhub` on 2026-11-01 as **batch 3**, after a read-only pre-flight and the founders' explicit approval with a confirmed backup (see D-025).
 - **Contradictions resolved:**
   - **X1:** `enrolled_on DATE` (contract), not the brief's `enrolled_at`.
   - **X2:** a cancelled session frees its slot (contract v0.7.1 §10.1).
@@ -663,9 +663,9 @@ Each entry separates **Verified** facts (checked by a command, with its output o
 - **Validation plan:**
   - VP-60–VP-83. M3 covers the database and model cases: VP-60–VP-75, VP-79, VP-80 and the database half of VP-81.
   - VP-76–VP-78, VP-82 and VP-83 are E3 service tests.
-- **Pending:** M3 implementation and its verification record; the E3 plan, which finalises the §8.5/§10.6 permission and audit details; applying M3 to `tuitionhub` (separate approval).
+- **Done since approval:** M3 implemented and verified (D-025) and applied to `tuitionhub` (batch 3); E3a and E3b finalised the §8.5/§10.6 details (D-026, D-027).
 
-## D-025 — M3 G5/G6 migrations and models verified — **Verified by automated tests 2026-11-01.**
+## D-025 — M3 G5/G6 migrations and models verified — **Verified by automated tests 2026-11-01; applied to `tuitionhub` 2026-11-01 (batch 3).**
 
 - **Scope:** five new migrations, appended after R2 (D-014 append-only):
   - `2026_10_29_000014_create_classes_table`
@@ -699,7 +699,22 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - Every named index with its columns in order; DATE/TIME/DATETIME/DECIMAL types; no `deleted_at`; migration order (VP-79).
   - Morph aliases `class`, `class_fee_version`, `class_session`, `class_enrollment`, `attendance`; public v4 UUIDs on classes, sessions and enrolments only; no internal ids or flags serialized (VP-80).
 - **Tests:** 45 new (structure 8, classes 5, fee versions 6, sessions 6, enrolments 9, attendance 6, models 5), plus cases added to `MorphMapTest` and `GeneratedColumnGuardTest`. `php artisan test` → **497 passed**.
-- **Schema verified only on `tuitionhub_test`** (D-010 guard, through `RefreshDatabase`). **The development database `tuitionhub` was not touched**; applying M3 there needs its own approval.
+- **Schema verified first on `tuitionhub_test`** (D-010 guard, through `RefreshDatabase`).
+- **Applied to the development database `tuitionhub` on 2026-11-01 (batch 3).**
+  - **Pre-flight**, read-only:
+    - the connection was confirmed as `tuitionhub` (environment `local`, MySQL 8.4.13);
+    - `migrate:status` showed everything through `000013` applied (batches 1–2) and only `000014`–`000018` pending;
+    - `migrate --pretend` showed only the five `CREATE TABLE`s and their own `ALTER`s, with no change to existing tables and no `CASCADE`/`SET NULL`;
+    - none of the five tables existed, and the parent key `student_profiles_id_institute_unique (id, managing_institute_id)` was present.
+  - **Applied** after the founders' explicit approval and their confirmation of a backup. `php artisan migrate` ran exactly the five migrations as batch 3, with no errors.
+  - **Verified afterwards:**
+    - no migration pending;
+    - 5 tables, empty;
+    - 17 CHECK constraints;
+    - 17 FKs, all `RESTRICT` on delete and `NO ACTION` on update;
+    - 11 unique keys;
+    - the three stored generated columns (`active_flag`, `current_flag`, `slot_flag`).
+  - No seeder ran, and no existing table was altered.
 - **Deferred:** the Pint style findings in `tests/Feature/Schema/Concerns/SchemaFixtures.php` and `app/Audit/AuditLogBuilder.php` (`fully_qualified_strict_types`, `ordered_imports`). Both predate M3 and are left for a separate style commit.
 - **Open:** E3 services and endpoints (VP-76–VP-78, VP-82, VP-83), including the proposed §8.5 withdraw and §10.6 cancel endpoints.
 
