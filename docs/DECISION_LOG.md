@@ -899,6 +899,89 @@ Each entry separates **Verified** facts (checked by a command, with its output o
   - **For the review:** §1.6 is written under "Writes" ("A write request may contain only the fields its endpoint lists"), so whether it binds reads is part of that review. Tightening these routes could break existing clients, so they are left unchanged here.
 - **Follow-up (not done here):** the F3 frontend still uses the interim workarounds (the empty `POST` and the account-ID paste). Switching it to §6.5, §9.6 and §9.7, and removing the account-ID display, is a separate frontend task.
 
+## D-029 — R4 schema for G7 demo money and G8 boost — **PROPOSED; awaiting founder approval** (prepared 2026-11-02)
+
+- **Status:** **nothing in D-029 is approved.**
+  - The "Recommended" column holds proposals and an AI recommendation, **not** founder decisions.
+  - Each item becomes approved only when the founders explicitly approve it. That approval will be recorded here with a date and names, as for D-015 and D-024.
+- **Scope:** `docs/SPRINT_SCHEMA.md` Part 4 (R4 Part 4, DRAFT). Documentation only: no migration, model, service, seeder or package; nothing ran against any database.
+  - **Tables:** eight new — `commission_rules`, `invoices`, `invoice_items`, `payments`, `payment_transactions`, `platform_commissions`, `boost_products`, `boost_purchases`.
+  - **Migrations:** `2026_10_29_000019`–`000027` (#21–#29).
+  - **Seeders:** two, one platform rule and one demo product.
+- **Runtime fact (verified 2026-11-02):** the project CLI PHP (`C:\php85\php`, PHP 8.5.12) has **BCMath enabled**: `extension_loaded('bcmath')` returns `true`. The staging and production runtimes are not verified.
+
+### Source contradictions (resolution proposed)
+
+| # | Point | Recommended | Status |
+|---|---|---|---|
+| X8 | `invoices.fee_amount_snapshot` (contract §2.3) vs `subtotal` as the fee snapshot (§11.1) | No separate column; amend contract §2.3 (Q58) | **PROPOSED** |
+| X9 | Invoice statuses: draft (six) vs contract (`open\|paid\|cancelled`) | The contract's three | **PROPOSED** |
+| X10 | Payment statuses: draft adds `processing`/`refunded`/`partially_refunded` | The contract's four (`pending\|succeeded\|failed\|cancelled`) | **PROPOSED** |
+| X11 | Commission rule shape: draft (`institute_id` NOT NULL, `rate_pct`, `is_active`) vs contract (scope, `rule_type`, `percentage`, dates) | The contract's shape; `percentage DECIMAL(5,2)` (Q60) | **PROPOSED** |
+| X12 | `billed_guardian_id`: draft NOT NULL vs contract nullable | Nullable | **PROPOSED** |
+| X13 | `invoice_items`: draft `CASCADE` and six types vs one tuition item | `RESTRICT`, `tuition` only, one per invoice | **PROPOSED** |
+| X14 | Boost: draft (`amount`, `demo_paid`, `duration_days`, name snapshot) vs contract (`price_snapshot`, `demo_recorded`, no placement) | The contract's columns (Q70) | **PROPOSED** |
+| X15 | `cancelled` invoices allowed, but no cancel endpoint | Schema supports it; no endpoint in E4 (Q65) | **PROPOSED** |
+
+### Open questions
+
+| # | Topic | Recommended | Status |
+|---|---|---|---|
+| Q57 | Migration #21 (`000019`): add unique indexes to the applied `class_enrollments` and `class_fee_versions` for the invoice composite FKs | Approve the index-only ALTER (alternative: no ALTER, service rules plus tests) | **PROPOSED** |
+| Q58 | `fee_amount_snapshot` | Not built; `subtotal` is the snapshot | **PROPOSED** |
+| Q59 | Zero-fee commission rules | Not allowed (`> 0`) | **PROPOSED** |
+| Q60 | Percentage precision and range | `DECIMAL(5,2)`, `0 < p <= 100` | **PROPOSED** |
+| Q61 | Seeded platform rule start date | `2026-01-01`, flat `100.00` LKR | **PROPOSED** |
+| Q62 | Invoice and payment numbers | `VARCHAR(48)`; a 40-character `TMP-<uuid>` placeholder, then `INV-`/`PAY-YYYY-MM-` + zero-padded id by primary key in the same transaction; format CHECKs | **PROPOSED** |
+| Q63 | Billing cycles (`one_time` could be billed again in another month; `term` has no calendar) | **Option A — monthly-only demo billing:** `term`/`one_time` → `422`; no snapshot column; no lifetime-uniqueness rule; one-time and term deferred. Option B (monthly plus one-time) is the alternative | **Open — founder decision required** |
+| Q64 | `invoices.created_by_user_id` | Store the billing user | **PROPOSED** |
+| Q65 | Invoice cancellation endpoint | None in E4 | **PROPOSED** |
+| Q66 | Idempotency key format | Client UUID, `CHAR(36)`, validated; never logged, audited or echoed | **PROPOSED** |
+| Q67 | Gateway JSON payload columns | Not built for the mock gateway | **PROPOSED** |
+| Q68 | Rule snapshot on payments | Not duplicated (invoices and accruals hold it) | **PROPOSED** |
+| Q69 | Demo boost product price | `1500.00` LKR | **PROPOSED** |
+| Q70 | Boost product name snapshot | Not built | **PROPOSED** |
+| Q71 | `commission_scope_snapshot` on invoices and accruals | Add it | **PROPOSED** |
+| Q72 | Institute lock serialises payments with that institute's other writes | Accept for the demo sprint | **PROPOSED** |
+| Q73 | Invoice creation requires an **active class** as well as an active enrolment | Adopt; `409 not_active`; amend contract §11.2 | **PROPOSED** |
+| Q74 | Idempotency collisions, including a key used at another institute | Adopt the A → B → R resolution: authorization first; replay only for the same identity at the same institute; otherwise a sanitized `409 idempotency_key_reused` (contract amendment) | **PROPOSED** |
+| Q75 | Arbitrary-precision engine | BCMath, required at runtime and fail-closed (enabled in development); alternative `brick/math` (already installed via `laravel/framework`) only if approved as a direct dependency | **PROPOSED** |
+| Q76 | `demo_label` on §12.1 products and the §11.7 completion payload | Add it (contract amendment) | **PROPOSED** |
+| Q77 | **Future-dated enrolment billing:** an `active` enrolment whose `enrolled_on` is after `issued_on` | Invoice only when the enrolment is effective on `issued_on` (`enrolled_on <= issued_on`), checked after the institute → class → enrolment locks; otherwise `422` on `issued_on`; no advance billing (VP-123) | **PROPOSED** |
+
+### Additional proposed rulings
+
+1. **Cross-institute idempotency and deadlocks** (Part 4, "Idempotency keys and duplicate-key resolution", and "Deadlocks, retries and failures"):
+   - **Lock order:** keeps deadlocks rare but does **not** eliminate them. InnoDB may take implicit shared index-record locks, and gap or insert-intention locks, during a duplicate-key `INSERT`.
+   - **Retries:** the existing `Transactions::retrying()` handling of 1213/40001 is kept (at most 3 attempts; 1205 not retried; `503` when retries run out).
+   - **Rollback before resolution:** the failed transaction is rolled back fully, as the outermost transaction, before resolution starts.
+   - **No cross-institute locks:** no resolution step locks another institute's rows while holding this institute's lock. The only cross-institute lock is InnoDB's implicit one during the failed `INSERT`, released by its rollback.
+   - **No database details in responses:** no SQL, constraint names, `Duplicate entry` text or key values ever reach API responses, logs or audit rows. **PROPOSED.**
+2. **Two-process concurrency tests are a release requirement** (VP-111, VP-115, VP-118 concurrent case, plus a forced-deadlock case). Single-connection tests are not sufficient. **PROPOSED.**
+3. **Separate development-database approval:**
+   - M4 runs first only on `tuitionhub_test`.
+   - Applying migration #21 (`000019`), which alters two tables that already hold data in `tuitionhub`, and the rest of M4 to the development database needs **its own explicit approval and a confirmed backup**, as for M3 (D-025). **PROPOSED.**
+4. **Demo-only enforcement is per table:**
+   - `is_demo = 1` on `invoices`, `payments`, `platform_commissions`, `boost_products`;
+   - `provider = 'mock'` and `gateway = 'mock'`;
+   - `status = 'demo_recorded'` on purchases;
+   - seeded, read-only rules and products;
+   - no new `is_demo` columns.
+
+   Every money response carries `demo: true` and a `demo_label`. **PROPOSED.**
+5. **Money arithmetic:**
+   - strings and `DECIMAL(15,2)`, half-up rounding, no floats;
+   - totals above the `DECIMAL(15,2)` maximum are refused (`422`);
+   - BCMath is required at runtime, failing closed;
+   - no integer fallback, because integer cents overflow for the full range. **PROPOSED.**
+
+### Remaining blockers to M4
+
+- The founders' explicit approval of D-029 (X8–X15, Q57–Q62, Q64–Q77 and the additional rulings above).
+- The **Q63 founder decision** (option A recommended).
+- Contract amendments to draft after approval, before E4: §2.3 (X8), §11.2 (Q63 option, Q73, Q77), §1.3/§11.6/§12.2 (`idempotency_key_reused`, Q74), §12.1/§11.7 (`demo_label`, Q76).
+- Before migration #21 reaches `tuitionhub`: its separate development-database approval and backup.
+
 ## R1 design notes — not yet approved
 
 **Nothing in this section is approved.** These are proposals and cautions for the upcoming R1 task (reconciled `docs/SPRINT_SCHEMA.md` and migrations). They are not decisions and must not be built until R1 approves them. Items marked **R1 proposal** go beyond both the contract and the sprint draft. The MySQL facts below were checked against the MySQL 8.4 Reference Manual (CHECK constraints, FOREIGN KEY constraints, generated columns, CREATE INDEX, date and time types) on 2026-10-28.

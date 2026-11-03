@@ -1390,3 +1390,701 @@ All items were approved by the TuitionHub founders on 2026-11-01 (D-024).
     - `DateTimeConventionTest`'s table list.
 - **Expected tests:** about **45–55 new** (VP-60–VP-75, VP-79, VP-80, and the database half of VP-81; VP-76–VP-78 and VP-82–VP-83 come with E3), so roughly **497–507** in total.
 - **Verification:** `php artisan test` (D-010 guard; `tuitionhub_test` only), `migrate --pretend` against `tuitionhub_test` for review, and `git diff --check`. Applying M3 to `tuitionhub` is a separate approval.
+
+# Part 4 — R4: G7 Demo money and G8 Boost (DRAFT)
+
+**Status:** **DRAFT — not approved. Documentation only; nothing is migrated or implemented.** Prepared 2026-11-02 on `sprint/day1-api-scaffold` (baseline `80b9bff`, after E2b). Revised the same day with the R4 security and billing corrections: number lengths, active-class billing, idempotency and concurrency, billing cycles, demo enforcement per table, money precision and migration readiness. Then revised again in the **R4 final review**: the deadlock wording, Q63's recommended option A, future-enrolment billing (Q77) and the runtime BCMath check. **Awaiting founder approval as D-029 (PROPOSED).**
+
+- **Sources, highest first:**
+  - `PRODUCT_DECISIONS.md` C1–C3 (demo money only, Rs 100 flat default, no settlement/payout, boost is a record only);
+  - contract v0.10: §2.3 adaptations, §11 invoices/payments/commission, §12 boost, §13 audit events;
+  - D-015 (`billed_guardian_id`, Q36 billing access), D-022/D-024 (lock order, Pattern I);
+  - the R4 brief (2026-11-02);
+  - the sprint draft §3.20–§3.27 and the ER schema, both historical (column detail only where compatible).
+- **Labels:** as in Parts 1–3. **Decided (…)** names its source. **PROPOSAL (R4 brief)** and **PROPOSAL** need approval; together with Q57–Q77 they are the approval list for this part (D-029, PROPOSED).
+- **Conventions:** §0 applies unchanged:
+  - money is `DECIMAL(15,2)` and currency `CHAR(3)` `'LKR'` (§0.4);
+  - vocabularies are `VARCHAR(32)` plus a `CHECK`, with server-canonicalised spelling;
+  - instants are UTC `DATETIME`; dates are `DATE` in `Asia/Colombo`;
+  - every FK is `ON DELETE RESTRICT` with `ON UPDATE` unset, and there is no `CASCADE`/`SET NULL`;
+  - constraint names are explicit;
+  - **no soft deletes** (§0.8 forbids them on money tables). No G7/G8 row is ever deleted by the application.
+- **Demo boundary (C2, C3):** every G7/G8 row is demo-only, enforced **per table** as shown in "Demo-only enforcement by table" below. Not every table has an `is_demo` column. There is **no** settlement, payout, refund or bank column anywhere, and `net_to_institute` is an amount **owed**, never a paid-out amount.
+
+### Demo-only enforcement by table
+
+| Table | How the database pins it as demo | Other demo rules |
+|---|---|---|
+| `commission_rules` | No `is_demo` column. Rows are seeded or configured only (no write endpoint, contract §14.1) | Read-only to the application in the sprint |
+| `invoices` | `is_demo` column, `invoices_demo_chk CHECK (is_demo = 1)` | — |
+| `invoice_items` | No `is_demo` column; it belongs to a demo invoice (RESTRICT FK) | `type = 'tuition'` only |
+| `payments` | `is_demo` column, `payments_demo_chk CHECK (is_demo = 1)`; `payments_provider_chk CHECK (provider = 'mock')` | — |
+| `payment_transactions` | No `is_demo` column; `payment_transactions_gateway_chk CHECK (gateway = 'mock')` | Append-only |
+| `platform_commissions` | `is_demo` column, `platform_commissions_demo_chk CHECK (is_demo = 1)`; `status = 'accrued'` only | Labelled "accrued, not collected" |
+| `boost_products` | `is_demo` column, `boost_products_demo_chk CHECK (is_demo = 1)` | Seeded; no write endpoint |
+| `boost_purchases` | No `is_demo` column; `boost_purchases_status_chk CHECK (status = 'demo_recorded')` | No placement fields |
+
+- **No new `is_demo` columns are proposed** for `commission_rules`, `invoice_items`, `payment_transactions` or `boost_purchases`. Their demo status follows from their parent row, from `gateway`/`status`, or from having no writer.
+- **API rule (E4):** every money object in a §11/§12 response carries `demo: true`, and every such response carries a `demo_label`. The contract already shows both on `Invoice`, `Payment`, the accrual and the purchase. §12.1 products and the §11.7 completion payload show `demo: true` without a `demo_label`; adding a label there is a contract amendment for D-029 (Q76).
+- **Not built:**
+  - **Settlements and payouts:** `settlements`, `settlement_items`, `institute_bank_accounts`, `platform_commissions.settlement_id`.
+  - **Old commission fields:** `institute_settings` commission fields and any 2% rule.
+  - **Refunds:** `refunds`; the `refunded`/`partially_refunded`/`processing` payment statuses; invoice `draft`/`partially_paid`/`overdue`.
+  - **Extra invoice lines:** `invoice_items` types other than `tuition`.
+  - **Live gateways:** `webhook_logs` and gateway JSON payloads.
+  - **Boost placement:** `featured_listings`, and any boost placement, period or duration field (C1).
+
+### Contradictions found between the sources (each needs a decision; proposed resolution shown)
+
+| # | Point | Sources disagree | Part 4 proposes |
+|---|---|---|---|
+| X8 | Fee snapshot column | Contract §2.3 lists `invoices.fee_amount_snapshot`; §11.1 defines `subtotal` as the fee-version amount snapshot | No separate column: `subtotal` **is** the fee snapshot, and `fee_version_id` records its source (Q58) |
+| X9 | Invoice statuses | Draft: `draft\|open\|paid\|partially_paid\|cancelled\|overdue`. Contract §11.1: `open\|paid\|cancelled` | The contract's three |
+| X10 | Payment statuses | Draft adds `processing`, `refunded`, `partially_refunded`. Contract §2.3: `pending\|succeeded\|failed\|cancelled` | The contract's four |
+| X11 | Commission rule shape | Draft: `institute_id` NOT NULL (no platform scope), `calculation_type`, `rate_pct DECIMAL(7,4)`, `is_active`. Contract §2.3: `scope platform\|institute\|class`, `rule_type`, `percentage`, effective dates, seeded platform rule | The contract's columns; `percentage` precision Q60 |
+| X12 | `billed_guardian_id` | Draft: NOT NULL. Contract §11.2: `NULL` when no guardian is linked yet | Nullable |
+| X13 | Invoice items | Draft: `ON DELETE CASCADE`; six item types. Brief/contract §11.2: one `tuition` item | `RESTRICT`; `tuition` only; one per invoice |
+| X14 | Boost | Draft: `amount`, `status demo_paid`, `duration_days`, `product_name_snapshot`. Contract §2.3: `price_snapshot`, `status demo_recorded`, no placement/period fields | The contract's columns (Q70 for a name snapshot) |
+| X15 | Cancelled invoices | Contract §11.1 allows `cancelled`, but no endpoint cancels an invoice | The schema supports it; no cancel path in E4 (Q65) |
+
+## G7 — Demo money
+
+### G7.1 `commission_rules`
+
+Purpose: the TuitionHub fee added on top of the class fee (C3, contract §11.1). Resolution at invoice creation: the active `class` rule, else the active `institute` rule, else the `platform` rule. Rules are versioned like fees: append-only, with `effective_to` set once.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `scope` | VARCHAR(32) | No | — | `platform\|institute\|class` | Decided (contract §2.3) |
+| `institute_id` | BIGINT UNSIGNED | Yes | NULL | NULL for `platform`; required for `institute` and `class` | Decided (contract §2.3); class-scope requirement PROPOSAL (tenant FK) |
+| `class_id` | BIGINT UNSIGNED | Yes | NULL | required only for `class` | Decided (contract §2.3) |
+| `scope_target_id` | BIGINT UNSIGNED, **STORED generated** | Yes | — | `CASE scope WHEN 'platform' THEN 0 WHEN 'institute' THEN institute_id ELSE class_id END`. NULL only for a row that `commission_rules_scope_target_chk` rejects, so a bad target fails on the CHECK (3819), not on NOT NULL | **PROPOSAL**: makes "one active rule per target" a unique key (NULL targets never collide) |
+| `rule_type` | VARCHAR(32) | No | — | `flat\|percentage` | Decided (contract §2.3) |
+| `flat_amount` | DECIMAL(15,2) | Yes | NULL | set only for `flat`; `> 0` (Q59) | Decided (contract §2.3) |
+| `percentage` | DECIMAL(5,2) | Yes | NULL | set only for `percentage`; `0 < p <= 100` (Q60) | Decided column (contract §2.3); type PROPOSAL |
+| `currency` | CHAR(3) | No | `'LKR'` | `'LKR'` only | Decided (contract §1.5, §2.3) |
+| `effective_from` | DATE | No | — | | Decided (contract §2.3) |
+| `effective_to` | DATE | Yes | NULL | NULL while current; set **once** when replaced | Decided column (contract §2.3); set-once PROPOSAL (as G5.2) |
+| `active_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(effective_to IS NULL, 1, NULL)` | Decided pattern (§0.9) |
+| `created_by_user_id` | BIGINT UNSIGNED | Yes | NULL | FK `users.id`; NULL only for seeded rules | Decided column (contract §2.3); nullable PROPOSAL (no management endpoint, contract §14.1) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `commission_rules_uuid_unique (uuid)`.
+  - `commission_rules_active_unique (scope, scope_target_id, active_flag)`: **one open rule per scope target** (R4 brief). The platform target is `0`, so only one open platform rule can exist.
+  - `commission_rules_target_from_unique (scope, scope_target_id, effective_from)`.
+- **Indexes:** `commission_rules_class_institute_index (class_id, institute_id)` (child index for the composite FK); `institute_id` gets its FK index.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `commission_rules_institute_fk (institute_id) → institutes(id)`.
+  - `commission_rules_class_institute_fk (class_id, institute_id) → classes(id, institute_id)`, parent `classes_id_institute_unique` (exists, G5.1). With `class_id` NULL the FK is not checked (MATCH SIMPLE). For a class rule it guarantees the class belongs to the rule's institute.
+  - `commission_rules_created_by_fk (created_by_user_id) → users(id)`.
+  - `scope_target_id` is generated from FK columns that use `RESTRICT` only, which §0.C-3 allows.
+- **CHECKs** (PROPOSAL):
+  - `commission_rules_scope_chk CHECK (scope IN ('platform','institute','class'))`.
+  - `commission_rules_scope_target_chk CHECK ((scope = 'platform' AND institute_id IS NULL AND class_id IS NULL) OR (scope = 'institute' AND institute_id IS NOT NULL AND class_id IS NULL) OR (scope = 'class' AND institute_id IS NOT NULL AND class_id IS NOT NULL))`.
+  - `commission_rules_type_chk CHECK (rule_type IN ('flat','percentage'))`.
+  - `commission_rules_value_chk CHECK ((rule_type = 'flat' AND flat_amount IS NOT NULL AND flat_amount > 0 AND percentage IS NULL) OR (rule_type = 'percentage' AND percentage IS NOT NULL AND percentage > 0 AND percentage <= 100 AND flat_amount IS NULL))`.
+  - `commission_rules_currency_chk CHECK (currency = 'LKR')`.
+  - `commission_rules_dates_chk CHECK (effective_to IS NULL OR effective_to >= effective_from)`.
+- **Seed** (Decided, contract §2.3): one platform rule, `flat`, `100.00` LKR, `effective_from` = Q61, `created_by_user_id` NULL. The seeder is idempotent.
+- **Application rules:**
+  1. **Read-only in the sprint.** There is no rule-management endpoint (contract §14.1); rules are seeded or configured. Rows are append-only, and the model refuses any change except setting `effective_to` once (as G5.2).
+  2. **Resolution for a date `d`** (invoice `issued_on`): for each scope in order class → institute → platform, the row with `effective_from <= d AND (effective_to IS NULL OR effective_to >= d)`. The first match wins. No platform rule in force → `500`, failing closed (a configuration error, VP-96).
+  3. **Calculation:** `flat` uses `flat_amount`; `percentage` uses `subtotal × percentage / 100`, rounded **half-up** to 2 decimals. It is computed as specified in "Money arithmetic and precision" below: server-side, never with floats. **No universal 2% default** (C3).
+
+### G7.2 `invoices`
+
+Purpose: a demo bill for one enrolment and billing period (contract §11.1, §11.2). Every amount and the applied rule are **snapshotted**, so a later fee or rule change never alters an issued invoice.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §11.1) |
+| `invoice_no` | VARCHAR(48) | No | — | unique, server-generated; final form `INV-YYYY-MM-` + zero-padded id, e.g. `INV-2026-11-000001`; a 40-character `TMP-<uuid>` placeholder exists only inside the creating transaction ("Invoice and payment numbers") | Decided (contract §11.1); length and scheme PROPOSAL (Q62) |
+| `enrollment_id` | BIGINT UNSIGNED | No | — | must be an enrolment of `class_id`, `student_id`, `institute_id` (composite FK) | Decided (draft, contract §11.2) |
+| `class_id` | BIGINT UNSIGNED | No | — | | **PROPOSAL (R4 brief)**: tenant/consistency column, as G5.3 |
+| `student_id` | BIGINT UNSIGNED | No | — | | Decided (draft, contract §11.1) |
+| `institute_id` | BIGINT UNSIGNED | No | — | the class's and the student's institute | Decided (draft, contract §11.1) |
+| `fee_version_id` | BIGINT UNSIGNED | No | — | the version in force on `issued_on`, of `class_id` (composite FK) | Decided (draft, contract §11.2) |
+| `billed_guardian_id` | BIGINT UNSIGNED | Yes | NULL | FK `guardian_profiles.id`; immutable addressee snapshot | Decided (contract §11.2, D-015; X12) |
+| `billing_period` | CHAR(7) | No | — | `YYYY-MM` | Decided format (contract §11.1 example); `term`/`one_time` classes Q63 |
+| `issued_on` | DATE | No | — | | Decided (contract §11.2) |
+| `due_on` | DATE | No | — | `>= issued_on` | Decided (contract §11.2) |
+| `currency` | CHAR(3) | No | `'LKR'` | `'LKR'` only | Decided (contract §1.5) |
+| `subtotal` | DECIMAL(15,2) | No | — | `> 0`; = fee version `amount` snapshot | Decided (contract §11.1; X8) |
+| `platform_fee` | DECIMAL(15,2) | No | — | `>= 0`; resolved commission | Decided (contract §11.1) |
+| `total` | DECIMAL(15,2) | No | — | `= subtotal + platform_fee` | Decided (contract §11.1) |
+| `commission_rule_id` | BIGINT UNSIGNED | No | — | FK `commission_rules.id`; the rule applied | Decided (contract §2.3) |
+| `commission_scope_snapshot` | VARCHAR(32) | No | — | `platform\|institute\|class` | **PROPOSAL**: the `Invoice.commission.scope` field (§11.1) without a join |
+| `commission_rule_type_snapshot` | VARCHAR(32) | No | — | `flat\|percentage` | Decided (contract §2.3) |
+| `commission_flat_snapshot` | DECIMAL(15,2) | Yes | NULL | set only for `flat` | Decided (contract §2.3) |
+| `commission_percentage_snapshot` | DECIMAL(5,2) | Yes | NULL | set only for `percentage` | Decided (contract §2.3); type as G7.1 |
+| `status` | VARCHAR(32) | No | `'open'` | `open\|paid\|cancelled` | Decided (contract §11.1; X9) |
+| `billable_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status <> 'cancelled', 1, NULL)` | **PROPOSAL**: makes "one non-cancelled invoice per enrolment and period" (§11.2) a unique key |
+| `is_demo` | BOOLEAN (TINYINT(1)) | No | `1` | always `1` | Decided (contract §2.3) |
+| `created_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; the billing user, from the session | **PROPOSAL** (audit actor is also recorded; Q64) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | `updated_at` changes only on a status change | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `invoices_uuid_unique (uuid)`.
+  - `invoices_invoice_no_unique (invoice_no)`.
+  - `invoices_period_unique (enrollment_id, billing_period, billable_flag)`: one non-cancelled invoice per enrolment and period (contract §11.2). The service maps a collision to `409` without chaining (D-022).
+  - `invoices_id_institute_unique (id, institute_id)`. PROPOSAL: the parent key for the payment composite FK.
+- **Indexes:**
+  - `invoices_enrollment_tenant_index (enrollment_id, class_id, student_id, institute_id)`: child index for the enrolment composite FK.
+  - `invoices_fee_version_class_index (fee_version_id, class_id)`: child index for the fee composite FK.
+  - `invoices_institute_status_index (institute_id, status)` (§11.3).
+  - `invoices_student_status_index (student_id, status)` (§11.4).
+  - `billed_guardian_id`, `commission_rule_id` and `created_by_user_id` get their FK indexes.
+- **FKs** (all `ON DELETE RESTRICT`):
+  - `invoices_enrollment_tenant_fk (enrollment_id, class_id, student_id, institute_id) → class_enrollments(id, class_id, student_id, institute_id)`.
+    - Its parent key `class_enrollments_id_tenant_unique` is **new** (migration #21; Q57).
+    - One FK guarantees that the enrolment, class, student and institute all agree. `class_enrollments` already guarantees the class and student belong to that institute (G5.3).
+  - `invoices_fee_version_class_fk (fee_version_id, class_id) → class_fee_versions(id, class_id)`, with **new** parent key `class_fee_versions_id_class_unique` (migration #21; Q57): the fee always belongs to the invoiced class.
+  - `invoices_billed_guardian_fk → guardian_profiles(id)`, `invoices_commission_rule_fk → commission_rules(id)`, `invoices_created_by_fk → users(id)`.
+- **CHECKs** (PROPOSAL):
+  - `invoices_status_chk CHECK (status IN ('open','paid','cancelled'))`.
+  - `invoices_currency_chk CHECK (currency = 'LKR')`.
+  - `invoices_amounts_chk CHECK (subtotal > 0 AND platform_fee >= 0 AND total = subtotal + platform_fee)`.
+  - `invoices_dates_chk CHECK (due_on >= issued_on)`.
+  - `invoices_period_chk CHECK (billing_period REGEXP '^[0-9]{4}-(0[1-9]|1[0-2])$')`. MySQL 8.4 permits `REGEXP` in a CHECK; to be confirmed by VP-105.
+  - `invoices_commission_snapshot_chk CHECK ((commission_rule_type_snapshot = 'flat' AND commission_flat_snapshot IS NOT NULL AND commission_percentage_snapshot IS NULL) OR (commission_rule_type_snapshot = 'percentage' AND commission_percentage_snapshot IS NOT NULL AND commission_flat_snapshot IS NULL))`.
+  - `invoices_commission_scope_chk CHECK (commission_scope_snapshot IN ('platform','institute','class'))`.
+  - `invoices_demo_chk CHECK (is_demo = 1)`.
+  - `invoices_invoice_no_chk CHECK (invoice_no REGEXP '^(INV-[0-9]{4}-(0[1-9]|1[0-2])-[0-9]{6,20}|TMP-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')`. PROPOSAL: only the two documented forms can be stored.
+- **Not database rules** (service, tested): the fee version is the one in force on `issued_on`; the commission rule is the one resolved for that date and applies to this class/institute; `subtotal` equals the version's `amount`; `billed_guardian_id` was the primary active guardian at creation.
+- **Application rules:**
+  1. **Create** (§11.2). Everything runs in one transaction, plus the audit row:
+     - Lock institute → class → enrolment, in that order; re-authorize (billing user; suspended → `403`).
+     - **Both the class and the enrolment must be active**, checked on the locked rows. The class must have `status = 'active'`; `draft` or `archived` → `409` `reason: not_active` (**PROPOSAL**, R4 corrections). The enrolment must have `status = 'active'` (contract), otherwise also `409 not_active`. Contract §11.2 states only the enrolment rule; adding the class rule and the `409 not_active` mapping is a contract amendment for D-029 (Q73).
+     - **The enrolment must be effective on `issued_on`** (`enrolled_on <= issued_on`), otherwise `422` on `issued_on`. This is **PROPOSED**, Q77; see "Billing date eligibility".
+     - Plain reads after the locks: the fee version on `issued_on` (`422` if none); the commission rule; the student's primary active guardian; an existing non-cancelled invoice for the period (`409`, with the unique key as backstop); the billing-cycle rule (Q63).
+     - Insert the invoice with a `TMP-<uuid>` placeholder number and its one item. Then set the final `invoice_no` by primary key in the **same** transaction ("Invoice and payment numbers").
+     - Audit `invoice.created` (contract §13) with the final number.
+  2. **Snapshots are immutable:** every column except `status`/`updated_at` never changes; the model refuses other changes (as G5.2).
+  3. **Status:** `open → paid` only through demo completion (§11.7); `open → cancelled` has no endpoint (Q65); `paid` and `cancelled` are final.
+
+### G7.3 `invoice_items`
+
+Purpose: the invoice's single tuition line (contract §11.1 `items`).
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `invoice_id` | BIGINT UNSIGNED | No | — | FK `invoices.id` | Decided (draft) |
+| `type` | VARCHAR(32) | No | `'tuition'` | `tuition` only | Decided (contract §11.1 example; R4 brief; X13) |
+| `description` | VARCHAR(255) | No | — | server-generated, e.g. "Tuition — November 2026" | Decided (contract §11.1) |
+| `amount` | DECIMAL(15,2) | No | — | `> 0`; `= invoices.subtotal` | Decided (R4 brief) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **No `uuid`:** items are only returned inside their invoice.
+- **Unique:** `invoice_items_invoice_type_unique (invoice_id, type)`: one tuition item per invoice (R4 brief). It also serves the invoice FK.
+- **FKs:** `invoice_items_invoice_fk (invoice_id) → invoices(id)` `ON DELETE RESTRICT` (not the draft's `CASCADE`; invoices are never deleted).
+- **CHECKs** (PROPOSAL): `invoice_items_type_chk CHECK (type IN ('tuition'))`; `invoice_items_amount_chk CHECK (amount > 0)`.
+- **Not a database rule:** `amount = invoices.subtotal` (a cross-table rule). It is written in the same insert transaction and tested (VP-95). Items are immutable.
+
+### G7.4 `payments`
+
+Purpose: a demo payment attempt by a linked guardian (contract §11.6, §11.7). No real money moves.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §11.6) |
+| `payment_no` | VARCHAR(48) | No | — | unique, server-generated; final form `PAY-YYYY-MM-` + zero-padded id, e.g. `PAY-2026-11-000001`; `TMP-<uuid>` placeholder only inside the creating transaction ("Invoice and payment numbers") | Decided (contract §11.6); length and scheme PROPOSAL (Q62) |
+| `invoice_id` | BIGINT UNSIGNED | No | — | | Decided (draft, contract) |
+| `institute_id` | BIGINT UNSIGNED | No | — | the invoice's institute (composite FK) | **PROPOSAL (R4 brief)**: tenant column, carried to commissions |
+| `payer_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; from the session | Decided (contract §11.6) |
+| `amount` | DECIMAL(15,2) | No | — | `= invoice.total` | Decided (contract §11.1) |
+| `platform_fee` | DECIMAL(15,2) | No | — | `= invoice.platform_fee` | Decided (contract §11.1) |
+| `net_to_institute` | DECIMAL(15,2) | No | — | `= invoice.subtotal`; **owed, not paid out** | Decided (contract §11.1) |
+| `currency` | CHAR(3) | No | `'LKR'` | | Decided (contract §1.5) |
+| `provider` | VARCHAR(32) | No | `'mock'` | `mock` only | Decided (contract §2.3) |
+| `status` | VARCHAR(32) | No | `'pending'` | `pending\|succeeded\|failed\|cancelled` | Decided (contract §2.3; X10) |
+| `pending_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status = 'pending', 1, NULL)` | **PROPOSAL**: one pending attempt per invoice (§11.6) |
+| `succeeded_flag` | TINYINT UNSIGNED, **STORED generated** | Yes | — | `IF(status = 'succeeded', 1, NULL)` | **PROPOSAL**: at most one success per invoice (§11.7) |
+| `idempotency_key` | CHAR(36) | No | — | unique; a client-generated UUID (Q66) | Decided unique (contract §11.6); type PROPOSAL |
+| `paid_at` | DATETIME | Yes | NULL | set with `succeeded` | Decided (contract §11.7) |
+| `completed_at` | DATETIME | Yes | NULL | set with any final status | **PROPOSAL** |
+| `is_demo` | BOOLEAN (TINYINT(1)) | No | `1` | always `1` | Decided (contract §2.3) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:**
+  - `payments_uuid_unique (uuid)`, `payments_payment_no_unique (payment_no)`, `payments_idempotency_key_unique (idempotency_key)`.
+  - `payments_pending_unique (invoice_id, pending_flag)`: one `pending` attempt per invoice (contract §11.6).
+  - `payments_succeeded_unique (invoice_id, succeeded_flag)`: **an invoice can never be paid twice**, even if a service check were missed (contract §11.7).
+  - `payments_id_institute_unique (id, institute_id)`. PROPOSAL: the parent key for the commission composite FK.
+- **Indexes:** `payments_invoice_institute_index (invoice_id, institute_id)` (child index for the composite FK); `payments_payer_created_index (payer_user_id, created_at)`.
+- **FKs:**
+  - `payments_invoice_institute_fk (invoice_id, institute_id) → invoices(id, institute_id)`.
+  - `payments_payer_fk (payer_user_id) → users(id)`.
+- **CHECKs** (PROPOSAL):
+  - `payments_status_chk CHECK (status IN ('pending','succeeded','failed','cancelled'))`.
+  - `payments_provider_chk CHECK (provider = 'mock')`; `payments_currency_chk CHECK (currency = 'LKR')`; `payments_demo_chk CHECK (is_demo = 1)`.
+  - `payments_amounts_chk CHECK (net_to_institute > 0 AND platform_fee >= 0 AND amount = net_to_institute + platform_fee)`.
+  - `payments_completion_chk CHECK ((status = 'pending' AND completed_at IS NULL AND paid_at IS NULL) OR (status = 'succeeded' AND completed_at IS NOT NULL AND paid_at IS NOT NULL) OR (status IN ('failed','cancelled') AND completed_at IS NOT NULL AND paid_at IS NULL))`.
+  - `payments_payment_no_chk CHECK (payment_no REGEXP '^(PAY-[0-9]{4}-(0[1-9]|1[0-2])-[0-9]{6,20}|TMP-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')` (PROPOSAL, as invoices).
+- **Not database rules** (service, tested): the amounts equal the invoice snapshot; the payer has an **active** guardian link to the invoice's student (Q36); the invoice is `open`.
+- **Application rules:**
+  1. **Attempt** (§11.6): lock institute → invoice; re-authorize the payer's active link.
+     - **Idempotency** follows "Idempotency keys and duplicate-key resolution" below, including when the same key was used at another institute:
+       - the same key with the same authorized invoice and payer → the original attempt (`200`);
+       - the same key for any other invoice, payer or institute → a sanitized `409` that reveals nothing about the other record.
+     - Invoice not `open` → `409`; an existing `pending` attempt → `409` (unique backstop).
+     - Insert the payment with a `TMP-<uuid>` number, set the final `payment_no` by primary key in the same transaction, and insert one `payment_transactions` row. Audit `payment.attempt_created`.
+  2. **Complete** (§11.7, demo flag and non-production only): lock institute → invoice → payment.
+     - Only `pending` transitions. Repeating the same outcome → `200`; a different outcome → `409`.
+     - On `succeeded`: re-check the invoice is `open` under its lock (`paid`/`cancelled` → `409`, attempt unchanged). Set the payment `succeeded` + `paid_at` + `completed_at` and the invoice `paid`, and insert **one** `platform_commissions` row.
+     - Audit `payment.succeeded|failed|cancelled` and `commission.accrued`.
+  3. **Amounts and snapshots are immutable;** only `status`, `paid_at`, `completed_at` and `updated_at` change, once, from `pending`.
+
+### G7.5 `payment_transactions`
+
+Purpose: an append-only event trail per attempt (contract §11.6), `gateway = 'mock'` only.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `payment_id` | BIGINT UNSIGNED | No | — | FK `payments.id` | Decided (draft) |
+| `gateway` | VARCHAR(32) | No | `'mock'` | `mock` only | Decided (contract §2.3) |
+| `event` | VARCHAR(32) | No | — | `attempt_created\|succeeded\|failed\|cancelled` | **PROPOSAL** |
+| `gateway_reference` | VARCHAR(64) | Yes | NULL | a mock reference, e.g. `MOCK-<uuid>`; never card or bank data | PROPOSAL (draft `gateway_txn_id`) |
+| `created_at` | DATETIME | No | — | UTC; the event instant | PROPOSAL (draft: append-only) |
+
+- **No `uuid`, no `updated_at`:** rows are never addressed or changed.
+- **No JSON payload columns** (draft `gateway_request/response/webhook`): nothing to store for the mock gateway, and nothing that could hold PII or secrets (Q67).
+- **Unique:** `payment_transactions_payment_event_unique (payment_id, event)`: each event at most once per attempt. It also serves the FK.
+- **FKs:** `payment_transactions_payment_fk (payment_id) → payments(id)`.
+- **CHECKs** (PROPOSAL): `payment_transactions_gateway_chk CHECK (gateway = 'mock')`; `payment_transactions_event_chk CHECK (event IN ('attempt_created','succeeded','failed','cancelled'))`.
+
+### G7.6 `platform_commissions`
+
+Purpose: the demo commission **accrual** for a succeeded payment (contract §11.7, §11.8). It is accrued, not collected; there are no settlement fields.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `payment_id` | BIGINT UNSIGNED | No | — | **unique**; the succeeded payment | Decided (contract §2.3) |
+| `institute_id` | BIGINT UNSIGNED | No | — | the payment's institute (composite FK) | Decided (draft, contract §11.8) |
+| `amount` | DECIMAL(15,2) | No | — | `>= 0`; `= payment.platform_fee` | Decided (contract §11.1) |
+| `currency` | CHAR(3) | No | `'LKR'` | | Decided (contract §1.5) |
+| `commission_rule_id` | BIGINT UNSIGNED | No | — | FK `commission_rules.id`; copied from the invoice | Decided (contract §2.3: rule snapshot columns as on invoices) |
+| `commission_scope_snapshot`, `commission_rule_type_snapshot`, `commission_flat_snapshot`, `commission_percentage_snapshot` | as G7.2 | as G7.2 | — | copied from the invoice; same CHECKs | Decided (contract §2.3); scope PROPOSAL as G7.2 |
+| `status` | VARCHAR(32) | No | `'accrued'` | `accrued` only | Decided (contract §2.3) |
+| `accrued_at` | DATETIME | No | — | the payment's `paid_at` | Decided (contract §11.8) |
+| `is_demo` | BOOLEAN (TINYINT(1)) | No | `1` | always `1` | Decided (contract §2.3) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:** `platform_commissions_uuid_unique (uuid)`; `platform_commissions_payment_unique (payment_id)`: **one accrual per payment** (contract §2.3, §11.7).
+- **Indexes:**
+  - `platform_commissions_payment_institute_index (payment_id, institute_id)`: child index for the composite FK. The unique key on `payment_id` alone does not cover `institute_id`.
+  - `platform_commissions_institute_accrued_index (institute_id, accrued_at)` (§11.8 filters).
+  - `platform_commissions_accrued_index (accrued_at)`.
+- **FKs:**
+  - `platform_commissions_payment_institute_fk (payment_id, institute_id) → payments(id, institute_id)`.
+  - `platform_commissions_rule_fk (commission_rule_id) → commission_rules(id)`.
+- **CHECKs** (PROPOSAL):
+  - `platform_commissions_status_chk CHECK (status = 'accrued')`; `…_currency_chk`; `…_demo_chk CHECK (is_demo = 1)`; `…_amount_chk CHECK (amount >= 0)`.
+  - The snapshot CHECKs as G7.2.
+- **Not database rules:** the payment is `succeeded`, and the amount and snapshot equal the invoice's. Both are written in the completion transaction and tested (VP-93, VP-97).
+- **Wording rule** (C3, contract §11.8): every read labels these rows "DEMO / TEST — accrued, not collected". No column, total or response may call them revenue, collected, settled or paid out.
+
+## G8 — Boost (demo record only)
+
+### G8.1 `boost_products`
+
+Purpose: a seeded demo product (contract §12.1). It has no placement, ranking or duration (C1).
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `code` | VARCHAR(40) | No | — | unique, e.g. `DEMO_BOOST_BASIC` | Decided (contract §2.3) |
+| `name` | VARCHAR(150) | No | — | | Decided (contract §2.3) |
+| `description` | TEXT | Yes | NULL | | Decided (contract §2.3) |
+| `price` | DECIMAL(15,2) | No | — | `> 0` | Decided (contract §2.3) |
+| `currency` | CHAR(3) | No | `'LKR'` | | Decided (contract §2.3) |
+| `is_active` | BOOLEAN (TINYINT(1)) | No | `1` | | Decided (contract §2.3) |
+| `is_demo` | BOOLEAN (TINYINT(1)) | No | `1` | always `1` | Decided (contract §2.3) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **Unique:** `boost_products_uuid_unique (uuid)`, `boost_products_code_unique (code)`.
+- **CHECKs** (PROPOSAL): `boost_products_price_chk CHECK (price > 0)`; `…_currency_chk`; `…_demo_chk CHECK (is_demo = 1)`; `…_active_chk CHECK (is_active IN (0, 1))`.
+- **Seed** (Decided, contract §12.1 example): `DEMO_BOOST_BASIC`, "Demo boost", `1500.00` LKR, active (Q69). The seeder is idempotent. No endpoint writes products.
+
+### G8.2 `boost_purchases`
+
+Purpose: a labelled demo purchase **record** (contract §12.2). No payment is taken, and it has **no effect** on the catalogue: §7.5 never reads this table.
+
+| Column | Type | Null | Default | Rule | Basis |
+|---|---|---|---|---|---|
+| `id` | BIGINT UNSIGNED AI | No | — | PK | PROPOSAL (draft) |
+| `uuid` | CHAR(36) | No | — | unique | Decided (contract §2.3) |
+| `class_id` | BIGINT UNSIGNED | No | — | | Decided (contract §2.3) |
+| `institute_id` | BIGINT UNSIGNED | No | — | the class's institute (composite FK) | Decided (contract §2.3) |
+| `boost_product_id` | BIGINT UNSIGNED | No | — | FK `boost_products.id`; active at purchase (service) | Decided (contract §2.3) |
+| `price_snapshot` | DECIMAL(15,2) | No | — | `> 0`; the product price at purchase | Decided (contract §2.3; X14) |
+| `currency` | CHAR(3) | No | `'LKR'` | | Decided (contract §2.3) |
+| `status` | VARCHAR(32) | No | `'demo_recorded'` | `demo_recorded` only | Decided (contract §2.3) |
+| `idempotency_key` | CHAR(36) | No | — | unique; a client UUID (Q66) | Decided unique (contract §2.3) |
+| `purchased_by_user_id` | BIGINT UNSIGNED | No | — | FK `users.id`; from the session | Decided (contract §2.3) |
+| `created_at`, `updated_at` | DATETIME | Yes | NULL | | PROPOSAL (§0.6) |
+
+- **No placement fields:** no start, end, duration, rank, position, slot or listing reference (C1; contract §2.3).
+- **Unique:** `boost_purchases_uuid_unique (uuid)`, `boost_purchases_idempotency_key_unique (idempotency_key)`.
+- **Indexes:**
+  - `boost_purchases_class_institute_index (class_id, institute_id)`: child index for the composite FK.
+  - `boost_purchases_institute_created_index (institute_id, created_at)` (§12.3).
+  - `boost_product_id` and `purchased_by_user_id` get their FK indexes.
+- **FKs:**
+  - `boost_purchases_class_institute_fk (class_id, institute_id) → classes(id, institute_id)`, parent `classes_id_institute_unique` (exists).
+  - `boost_purchases_product_fk → boost_products(id)`, `boost_purchases_purchased_by_fk → users(id)`.
+- **CHECKs** (PROPOSAL): `boost_purchases_status_chk CHECK (status = 'demo_recorded')`; `…_price_chk CHECK (price_snapshot > 0)`; `…_currency_chk`.
+- **Application rules** (§12.2): lock institute → class; re-authorize (admin of the owning institute; suspended → `403`).
+  - **Idempotency** follows "Idempotency keys and duplicate-key resolution" below:
+    - the same key with the same authorized class and purchaser → the original record (`200`);
+    - the same key for any other class, purchaser or institute → a sanitized `409`.
+  - The product must be active. The price comes from the product; client prices → `422`.
+  - Audit `boost_purchase.recorded_demo` (contract §13). Rows are immutable.
+
+## G7/G8 lock order
+
+Extends the G5/G6 order (D-022 Option A, Pattern I; D-024):
+
+```
+1 otp_challenges
+2 users                EXCLUSIVE — self-scoped transactions only (Pattern U)
+3 institutes           EXCLUSIVE by primary key — first lock of every institute-scoped write
+4a student_profiles → guardian_invitations → guardian_profiles → student_guardians      (E2)
+4b classes → class_fee_versions → class_sessions → class_enrollments → attendances    (G5/G6)
+4c   … class_enrollments → invoices → payments → platform_commissions                 (G7)
+       invoice_items and payment_transactions are inserted only, after their parent's lock
+4d classes → boost_purchases                                                          (G8)
+   commission_rules and boost_products: read-only in the sprint (seeded), no writers
+8 users                SHARED only (FK checks, audit rows, explicit FOR SHARE re-checks)
+9 audit_logs           insert
+```
+
+- **Every G7/G8 write takes the institute lock first,** including the guardian's payment paths: the payer is re-authorized through `student_guardians`, whose writers all hold the same institute lock (D-023), so a plain read of the link after the institute lock is current.
+- **Every row is locked by primary key.** Sets of rows are found with plain reads after the relevant lock: the fee version in force, the applied rule, the primary guardian, an existing invoice for the period, a pending or succeeded attempt, an idempotency key. Every writer of those rows holds the same locks.
+- Skipping a level is allowed (a payment path does not lock `classes`); taking a level out of order is not.
+
+| Write | Explicit locks, in order | Implicit shared locks | Plain reads after the locks |
+|---|---|---|---|
+| Invoice create (§11.2) | `institutes` → `classes` → `class_enrollments` | `class_fee_versions`, `commission_rules`, `guardian_profiles`, `student_profiles`, `users` (actor, audit); item insert: `invoices` (new) | fee version on `issued_on`; resolved rule; primary active guardian; non-cancelled invoice for the period |
+| Payment attempt (§11.6) | `institutes` → `invoices` | `users` (payer, audit); transaction insert: `payments` (new) | payer's active link; pending attempt. The idempotency key is **not** read under this lock (see "Idempotency keys and duplicate-key resolution") |
+| Demo completion (§11.7) | `institutes` → `invoices` → `payments` | `commission_rules`, `users` (audit) | invoice status (under its lock); existing accrual |
+| Boost purchase (§12.2) | `institutes` → `classes` | `boost_products`, `users` | product active. The idempotency key is **not** read under this lock (as payments) |
+
+- **All of these** use `Transactions::retrying()`, with nested calls propagating (D-022). Unique-key backstops (period, pending, succeeded, idempotency, accrual) are mapped to `409` or the idempotent replay without chaining the database error.
+- **Read paths** (§11.3–§11.5, §11.8, §12.1, §12.3) take no locks.
+
+## Invoice and payment numbers (Q62)
+
+**PROPOSAL.** Unique, readable numbers without a counter table:
+
+1. **Placeholder:** the row is inserted with `invoice_no` / `payment_no` = `TMP-` + a fresh UUID v4, e.g. `TMP-3f2a…`. That is 4 + 36 = **40 characters**, unique by construction.
+2. **Final number:** in the **same** transaction, immediately after the insert and before any other statement that could fail, the row is updated by primary key:
+   - invoices: `INV-` + `YYYY-MM` of `issued_on` + `-` + the `id` zero-padded to at least 6 digits;
+   - payments: `PAY-` + `YYYY-MM` of the creation date in `Asia/Colombo` + `-` + the zero-padded `id`.
+
+   The longest final form is 12 + 20 digits (`BIGINT UNSIGNED` maximum) = 32 characters. **`VARCHAR(48)`** holds both forms with margin.
+3. **Atomicity:**
+   - The placeholder exists only inside the creating transaction, which holds the institute → class → enrolment locks (invoices) or the institute → invoice locks (payments).
+   - Under REPEATABLE READ no other transaction can read the uncommitted row, so a `TMP-` number is never visible.
+   - If anything later fails, the whole transaction rolls back, including the insert, the placeholder and the update.
+   - The audit row and the API response use the final number only.
+4. **CHECKs:** `invoices_invoice_no_chk` and `payments_payment_no_chk` allow only the two forms. A committed `TMP-` row is impossible through the service, and VP-109 asserts it.
+5. **Properties:** numbers are global (not per institute or per month), increase with `id`, and may have gaps after rollbacks. Gap-free numbering would need a counter table and an extra lock (Q62 alternative).
+
+## Idempotency keys and duplicate-key resolution
+
+Payment attempts (§11.6) and boost purchases (§12.2) carry a client `idempotency_key`. Each column is **globally** unique (`payments_idempotency_key_unique`, `boost_purchases_idempotency_key_unique`), so a key may already exist **at another institute**.
+
+**Operation identity** (what makes a replay "the same request"):
+- **Payment:** `(invoice_id, payer_user_id)`, and through the invoice, the institute.
+- **Boost purchase:** `(class_id, purchased_by_user_id)`, and through the class, the institute.
+
+**Rules** (PROPOSAL, R4 corrections):
+1. **Authorization first.** The caller must be authorized for the operation they are requesting (their invoice, their class) before any idempotency outcome is returned. A request the caller may not make gets the normal `404`/`403`, whatever the key.
+2. **Replay:** the same key and the same identity, at the same institute → `200` with the **original** record, re-read under the locks below.
+3. **Sanitized conflict:** the same key with a different identity, or at a different institute → `409` `{"message":"This idempotency key has already been used.","reason":"idempotency_key_reused"}`.
+   - The response names nothing about the other record: no uuid, number, amount, class, invoice, institute or person.
+   - The new reason code `idempotency_key_reused` needs a contract amendment (Q74).
+4. **No logging:** idempotency keys are never logged, audited or echoed in errors.
+   - The MySQL duplicate-key message contains the key (`Duplicate entry '…' for key …`), so the `QueryException` is mapped by constraint name **without chaining**, and is never reported (D-022 pattern).
+   - Service parameters carrying the key are marked `#[\SensitiveParameter]`.
+5. **Outermost transaction only.** These operations refuse to run inside an enclosing transaction (`DB::transactionLevel() === 0` is asserted). This ensures the resolution step below really starts a **fresh** transaction with a fresh snapshot.
+
+**Write sequence:**
+
+| Step | Transaction | Locks held, in order | What happens |
+|---|---|---|---|
+| A. Pre-check | fresh, read-only | none | Plain read of the key's row: only `institute_id` and the identity columns, which **never change** after insert. Found → go to **R**. Not found → **B** |
+| B. Attempt | `T1` (`Transactions::retrying()`) | `institutes` (own) → `invoices` (payment) or `classes` (boost) | Authorize, check state, `INSERT` with the key. Success → commit. Duplicate on the key's unique index → **roll `T1` back at once** (releasing every lock), then **R** |
+| R. Resolve | `T2`, fresh | first none, then the own institute's locks | `R1` and `R2` below |
+
+- **R1 (no locks held):** a read of the existing row's `institute_id` and identity columns in the fresh transaction `T2`.
+  - This is a new snapshot, taken after `T1` rolled back and after the winning transaction committed. An uncommitted winner makes `T1`'s insert **wait**; `T1` gets the duplicate-key error only after the winner commits, and its insert succeeds if the winner rolls back.
+  - The read is current for these immutable columns. It is **not** a nonlocking read inside the failed transaction's old REPEATABLE READ snapshot.
+  - **Different institute** → sanitized `409` immediately. No lock is ever taken on the other institute's row.
+- **R2 (same institute):** lock the own `institutes` row → the requested invoice (or class), and re-authorize. Then lock the existing row with `SELECT … FOR SHARE` by primary key, which is a current read. Compare the identity: equal → replay (`200`, the current state of the original); different → sanitized `409`.
+  - The lock order is institute → invoice → payment (or institute → class → boost purchase), as in the main lock table.
+  - When the existing row belongs to a different invoice or class of the **same** institute, that row is locked after the requested one. Every writer of either row holds the same institute lock first, so these paths are serialised by that lock. That makes a deadlock between them very unlikely, but it is not a general no-deadlock guarantee (see "Deadlocks, retries and failures" below).
+
+**Idempotency lock-order matrix:**
+
+| Situation | Locks taken, in order | Locks on another institute's rows |
+|---|---|---|
+| New key (normal path) | own `institutes` → `invoices`/`classes` → insert | none |
+| Key already committed (pre-check hit) | R1: none → R2 (own institute only): own `institutes` → `invoices`/`classes` → `payments`/`boost_purchases` `FOR SHARE` | **none**. A different institute is answered from R1 without locks |
+| Concurrent winner at the **same** institute | impossible: both need the same institute lock first, so they run one after the other. The second sees the committed key at A, or gets 1062 at B → R2 | none |
+| Concurrent winner at **another** institute | B: own `institutes` → `invoices`/`classes` → `INSERT` waits for the winner's commit and then fails with 1062 → `T1` rolls back → R1 → sanitized `409` | **Only the implicit locks InnoDB itself takes during the `INSERT`'s duplicate-key check** (a shared lock on the conflicting index record, plus any gap or insert-intention locks under REPEATABLE READ). They are inherent to `INSERT`, and released when `T1` rolls back. They **can** take part in an InnoDB deadlock, for example when several sessions insert the same key (MySQL 8.4 manual, "Locks Set by Different SQL Statements in InnoDB"). The lock order keeps that rare but does not rule it out. Deadlocks are handled by retry ("Deadlocks, retries and failures"). The service never takes an explicit or `FOR SHARE` lock on another institute's row. |
+| Completion (§11.7) | own `institutes` → `invoices` → `payments` → insert `platform_commissions` | none |
+
+- **Never reversed:** no path locks a payment or purchase before its invoice or class, or another institute after its own.
+- The unique keys `payments_succeeded_unique` and `platform_commissions_payment_unique` remain the final backstops against a double success or a double accrual.
+- **A genuine two-process concurrency test** (two PHP processes, two database connections; VP-111, VP-115) is **required before release** (E2c). Single-connection tests cannot prove these interleavings.
+
+**Deadlocks, retries and failures** (PROPOSAL, R4 final review):
+1. **Lock order minimises deadlocks; it does not eliminate them.**
+   - InnoDB may set implicit locks the application never asks for: a shared lock on a duplicate index record during an `INSERT`, gap and insert-intention locks under REPEATABLE READ, and shared locks from FK checks.
+   - These can form a deadlock even when every explicit lock follows the documented order.
+2. **Existing retry handling is kept.**
+   - `T1` runs inside `Transactions::retrying()` (D-022; `app/Support/Transactions.php`): MySQL error **1213** / SQLSTATE **40001** (deadlock) is retried, at most `MAX_ATTEMPTS = 3` times and only for the outermost transaction; nested calls propagate. A lock wait timeout (**1205**) is not retried, because the request already waited the full `innodb_lock_wait_timeout`.
+   - When retries run out, or a lock wait times out, the result is `503 {"message":"The service is busy. Please try again."}` with `Retry-After: 1`. Nothing was saved, so the client may repeat the request with the **same** key.
+   - A retried `T1` starts again from its first statement and may now meet the duplicate key, which leads to **R**.
+3. **The failed transaction is fully rolled back before resolution.**
+   - `T1` is the outermost transaction (rule 5), so the rollback is a real `ROLLBACK`, not a savepoint. Every lock `T1` held, including the implicit lock on the other institute's index record, is released before **R** begins.
+   - **R** asserts `DB::transactionLevel() === 0` before it starts.
+4. **No resolution step locks another institute's rows while holding this institute's lock.**
+   - R1 holds no locks at all.
+   - R2 locks only this institute's `institutes` row, the requested invoice or class, and an existing row **of the same institute**.
+   - The only cross-institute lock anywhere is InnoDB's implicit one during `T1`'s `INSERT`, and it ends with `T1`'s rollback.
+5. **Database details never reach API responses.**
+   - 1213 or lock-wait failures → the generic `503` above. A duplicate key on an idempotency, period, pending or succeeded unique key → the mapped `409`/replay. Any other `QueryException` → a generic `500`.
+   - No response, log line or audit row contains SQL, constraint or index names, `Duplicate entry` text, or key values.
+   - The exception is mapped without chaining (D-022).
+6. **Release requirement:** the two-process tests VP-111, VP-115 and VP-118 (concurrent case) must pass before release. They include a forced-deadlock case showing a retried `T1` ends in exactly one row, or a replay or sanitized `409`, and never a database error in the response.
+
+## Billing cycles (Q63 — unresolved, founder decision required)
+
+**The gap.** `class_fee_versions.billing_cycle` is `monthly|term|one_time` (G5.2). Contract §11.2 takes any `billing_period` and creates an invoice whenever the enrolment is active. `invoices_period_unique (enrollment_id, billing_period, billable_flag)` allows **one non-cancelled invoice per enrolment per period**. For a `one_time` class, an invoice for `2026-11` and another for `2026-12` have **different** `billing_period` values, so both are accepted: **a one-time fee could be billed twice** (or monthly). For `term`, no term calendar exists anywhere in the sources, so "one invoice per term" cannot be expressed.
+
+**Choices (Q63 stays Open until the founders select one):**
+
+- **A. Monthly only (smallest).**
+  - E4 invoices only enrolments whose fee version in force on `issued_on` has `billing_cycle = 'monthly'`.
+  - A `term` or `one_time` fee version → `422` on `billing_period`, with the message "Invoicing for this billing cycle is not available in the demo".
+  - The schema above is sufficient. Tests: VP-119 (A).
+- **B. Monthly plus one-time.**
+  - **Monthly** is as A.
+  - **`one_time`:** at most **one non-cancelled invoice per enrolment for its lifetime**, checked under the institute → class → enrolment locks, where every invoice writer holds them. A plain read for any non-cancelled `one_time` invoice of that enrolment happens before insert; one exists → `409` `reason: already_invoiced` (a new code, contract amendment). `billing_period` stores the month of issue.
+  - **Optional DB backstop (PROPOSAL, only under B):** a snapshot column `billing_cycle_snapshot` plus a generated `period_key = IF(billing_cycle_snapshot = 'one_time', 'ONCE', billing_period)` in the unique key instead of `billing_period`. Without it, the rule is service-only and tested.
+  - Tests: VP-119 (B).
+- **`term` (both choices):** **deferred**. Term invoices are refused like A, because no term calendar or term-to-period mapping is approved. No production term-billing behaviour is invented here.
+
+**Recommended selection for founder confirmation: Option A — monthly-only demo billing.** This is a recommendation only; Q63 stays **Open** until the founders confirm it.
+- Monthly fee versions are supported. A `term` or `one_time` fee version in force on `issued_on` → `422` on `billing_period` ("Invoicing for this billing cycle is not available in the demo").
+- **No** `billing_cycle_snapshot` column and **no** lifetime invoice-uniqueness rule. `invoices_period_unique` stays as specified, and is sufficient because only monthly invoices can exist.
+- One-time and term billing semantics are **deferred**. No advance, partial or pro-rated billing is added.
+- **After approval:** contract §11.2 gains the monthly-only rule and its `422`; VP-119 uses its option A form; E4's `InvoiceService` refuses non-monthly fee versions before insert.
+
+## Billing date eligibility (future-dated enrolments; Q77 — PROPOSED)
+
+**The gap.** An enrolment can have `status = 'active'` while its `enrolled_on` is still in the future (D-024: `enrolled_on` may be in the future, and the place counts from creation). Contract §11.2 only says "Enrolment must be active", so as written it would let the institute bill for a month before the student starts.
+
+**Proposed rule** (PROPOSAL; Q77, pending founder confirmation). An invoice can be created only when **all** of these hold, checked **after** the institute → class → enrolment locks, on the locked rows:
+1. the class has `status = 'active'` (otherwise `409 not_active`, Q73);
+2. the enrolment has `status = 'active'` (otherwise `409 not_active`);
+3. the enrolment is **effective on `issued_on`**, by the G5.3 rule 3 definition: `enrolled_on <= issued_on AND (withdrawn_on IS NULL OR issued_on < withdrawn_on)`. Under rule 2, `withdrawn_on` is NULL, so this reduces to `enrolled_on <= issued_on`.
+
+**Response for an ineligible billing date:** `422` keyed on `issued_on`, with `{"message":"The enrolment is not effective on this invoice date.","errors":{"issued_on":["The enrolment is not effective on this invoice date."]}}`. It is an invalid request value detected by a business rule, so it uses the §1.3 `422` shape with no `reason`. The checks run in the order 1 → 2 → 3, then the fee-version lookup (`422` if none).
+
+| Case (class active, enrolment active, `enrolled_on = 2026-12-01`) | `issued_on` | Result |
+|---|---|---|
+| Future-dated enrolment, invoice dated today, before it starts | `2026-11-15` | `422` on `issued_on`; no invoice |
+| Invoice date before `enrolled_on` | `2026-11-30` | `422` on `issued_on`; no invoice |
+| Invoice date equal to `enrolled_on` | `2026-12-01` | Allowed (`201`), subject to the fee version and Q63 |
+| Invoice date after `enrolled_on` | `2026-12-15` | Allowed (`201`), subject to the fee version and Q63 |
+
+- **No advance billing** is introduced: a parent cannot be invoiced before the enrolment takes effect. Advance billing would need its own decision.
+- **Test:** VP-123.
+
+## Money arithmetic and precision
+
+- **Authoritative amounts:** every amount is computed and stored by the server (contract §1.1). Client amounts are rejected (`422`). Money travels as strings with exactly two decimals (contract §1.5) and is read from `DECIMAL(15,2)` columns as strings, never as floats.
+- **Range:** `DECIMAL(15,2)` holds up to `9,999,999,999,999.99`.
+  - `total = subtotal + platform_fee` can exceed that when the subtotal is near the maximum. The service checks `total` against the maximum before insert and refuses an out-of-range result with `422` on the fee (it never truncates).
+  - A class fee that large is not realistic, but the boundary is defined and tested (VP-120).
+- **No binary floating point:** no `float`, `round()`, `*` or `/` on money anywhere. That includes PHP floats, JSON numbers and JavaScript `Number` arithmetic in the frontend, which displays API strings only.
+- **Percentage, half-up:**
+  - `fee = subtotal × percentage / 100`, rounded half-up at 2 decimals. In integer terms: `fee_cents = floor((subtotal_cents × percentage_hundredths + 5000) / 10000)`; every operand is non-negative.
+  - Implemented with **bcmath** strings: `bcdiv(bcadd(bcmul($subtotalCents, $pctHundredths, 0), '5000', 0), '10000', 0)`, then formatted with two decimals.
+  - Examples:
+    - `333.33 × 2.50 %` = `8.33325` → `8.33`;
+    - `1.00 × 0.50 %` = `0.005` → `0.01`;
+    - `1234.50 × 12.50 %` = `154.3125` → `154.31`;
+    - `2500.00 × 100.00 %` = `2500.00`.
+- **Runtime check:**
+  - The money services fail closed, as a configuration error (`500`, logged without amounts), if `extension_loaded('bcmath')` is false. The check runs once per process, and a boot-time check is also reported by a health check.
+  - **Runtime check, 2026-11-02 (R4 final review):** the project's CLI PHP is `C:\php85\php` (PHP **8.5.12**, NTS x64, loaded configuration `C:\php85\php.ini`). There, `extension_loaded('bcmath')` returns **`true`**, and `bcadd('9999999999999.99','0.01',2)` returns `10000000000000.00`. That is the runtime used by `php artisan test` and the development server.
+  - The staging and production PHP are **not verified**; they must pass the same check before E4 is deployed. No extension or package is installed by this specification.
+- **Fallback:**
+  - **Native integer arithmetic is not proven safe for the full range.** `subtotal_cents` can reach `999,999,999,999,999` (≈ 1.0 × 10¹⁵), and multiplied by `percentage_hundredths` up to `10,000` that is ≈ 1.0 × 10¹⁹, above PHP's `PHP_INT_MAX` (≈ 9.22 × 10¹⁸).
+  - An integer fallback would be allowed **only** with an approved, validated cap of `subtotal_cents ≤ 922,337,203,685,477` (`subtotal ≤ 9,223,372,036,854.77` LKR), under which `subtotal_cents × 10,000 + 5,000` stays below `PHP_INT_MAX`. That cap is below the `DECIMAL(15,2)` maximum. No cap is proposed, so **bcmath is required and there is no fallback**.
+  - Note: `brick/math` (1.0.0) is already installed as a dependency of `laravel/framework`. Laravel's `decimal:2` cast uses it with half-up rounding. Using it directly would be an alternative arbitrary-precision engine, but depending on it directly needs approval (Q75).
+- **Tests:**
+  - VP-120: boundaries and rounding, including `.xx5` ties, the minimum `0.01`, `100 %` and the maximum total.
+  - VP-121: a missing bcmath fails closed.
+
+## R4 migration order (M4)
+
+Appended after `2026_10_29_000018` (append-only, D-014). Every FK points to an earlier table; there are no cycles or deferred FKs.
+
+| # | Migration | Creates | FKs to |
+|---|---|---|---|
+| 21 | `2026_10_29_000019_add_g7_parent_keys.php` | **ALTER, index only:** `class_enrollments_id_tenant_unique (id, class_id, student_id, institute_id)` and `class_fee_versions_id_class_unique (id, class_id)` (Q57) | — |
+| 22 | `2026_10_29_000020_create_commission_rules_table.php` | `commission_rules` (+ `scope_target_id`, `active_flag`, CHECKs) | `institutes`, `classes` (composite), `users` |
+| 23 | `2026_10_29_000021_create_invoices_table.php` | `invoices` (+ `billable_flag`, `(id, institute_id)` unique, CHECKs) | `class_enrollments` (composite), `class_fee_versions` (composite), `guardian_profiles`, `commission_rules`, `users` |
+| 24 | `2026_10_29_000022_create_invoice_items_table.php` | `invoice_items` (+ CHECKs) | `invoices` |
+| 25 | `2026_10_29_000023_create_payments_table.php` | `payments` (+ `pending_flag`, `succeeded_flag`, `(id, institute_id)` unique, CHECKs) | `invoices` (composite), `users` |
+| 26 | `2026_10_29_000024_create_payment_transactions_table.php` | `payment_transactions` (+ CHECKs) | `payments` |
+| 27 | `2026_10_29_000025_create_platform_commissions_table.php` | `platform_commissions` (+ CHECKs) | `payments` (composite), `commission_rules` |
+| 28 | `2026_10_29_000026_create_boost_products_table.php` | `boost_products` (+ CHECKs) | — |
+| 29 | `2026_10_29_000027_create_boost_purchases_table.php` | `boost_purchases` (+ CHECKs) | `classes` (composite), `boost_products`, `users` |
+
+Seeders (not migrations): `CommissionRuleSeeder` (one platform rule), `BoostProductSeeder` (one demo product). Both are idempotent and are added to `DatabaseSeeder`.
+
+**Composite FK parent keys**, verified against §0.C-4: the parent has a **unique** index whose first columns are the referenced columns, in the same order, with identical `BIGINT UNSIGNED` types.
+
+| Child FK | Parent unique key | Exists? | Named child index |
+|---|---|---|---|
+| `commission_rules (class_id, institute_id)` | `classes_id_institute_unique (id, institute_id)` | **yes** (G5.1) | `commission_rules_class_institute_index` |
+| `invoices (enrollment_id, class_id, student_id, institute_id)` | `class_enrollments_id_tenant_unique` | **new** in #21 (Q57) | `invoices_enrollment_tenant_index` |
+| `invoices (fee_version_id, class_id)` | `class_fee_versions_id_class_unique` | **new** in #21 (Q57) | `invoices_fee_version_class_index` |
+| `payments (invoice_id, institute_id)` | `invoices_id_institute_unique` | created in #23 | `payments_invoice_institute_index` |
+| `platform_commissions (payment_id, institute_id)` | `payments_id_institute_unique` | created in #25 | `platform_commissions_payment_institute_index` |
+| `boost_purchases (class_id, institute_id)` | `classes_id_institute_unique` | **yes** (G5.1) | `boost_purchases_class_institute_index` |
+
+- **No `CASCADE`, `SET NULL` or `SET DEFAULT` anywhere.**
+  - The generated columns use `status` (invoices, payments) and `effective_to` (rules), none of which has an FK. `commission_rules.scope_target_id` uses `institute_id`/`class_id`, whose FKs are `RESTRICT` only (§0.C-3).
+  - The CHECKs that name FK columns (`commission_rules_scope_target_chk`) are allowed with `RESTRICT` (§0.C-2, VP-1).
+- **Migration #21 alters two applied tables** (`tuitionhub` batch 3) by adding unique indexes only. Existing rows already satisfy them, because `id` is unique. `down()` drops the two indexes.
+- **`down()` drops each table;** rolling back M4 reverses #29 → #21 and leaves G1–G6 data intact.
+- **The first run goes only to `tuitionhub_test`,** through the normal suite (`RefreshDatabase`). Applying M4 to `tuitionhub` needs its own approval and a confirmed backup, as for M3.
+
+### M4 migration readiness review (R4 corrections, 2026-11-02)
+
+Re-checked for `2026_10_29_000019`–`000027` (#21–#29). Documentation review only; nothing was run.
+
+| Check | Result |
+|---|---|
+| **#21: index-only changes to applied tables** | Two `ADD UNIQUE INDEX` statements; no column, type, default or data change. `id` is the primary key, so every superset of `id` is already unique: the build cannot fail on existing rows. InnoDB builds a secondary unique index in place. The existing composite FKs that reference these tables (`attendances_enrollment_class_fk` → `class_enrollments_id_class_unique`) keep their own parent keys untouched. |
+| **#21 approval** | Applying #21 to the **development database** `tuitionhub` changes two tables that already hold data. It requires **its own approval and a confirmed backup**, separately from running M4 on `tuitionhub_test`. |
+| **Composite FK parent keys** | All six listed above. Each parent is a **unique** index whose leading columns match the FK's columns in order, all `BIGINT UNSIGNED` (§0.C-4). Two parents are new (#21); two are created in #23/#25 before their children (#25/#27); two exist (G5.1). |
+| **Generated columns** | `scope_target_id`, `active_flag` (rules), `billable_flag` (invoices), `pending_flag`, `succeeded_flag` (payments): all `STORED`, deterministic, and referencing no `AUTO_INCREMENT` column. Only `scope_target_id` reads FK columns, whose FKs are `RESTRICT` (§0.C-3). Each sits in a unique index with its NULL-means-inactive meaning (§0.9). The model guard `GuardsGeneratedColumns` covers them (VP-104). |
+| **CHECK constraints** | Use only same-row columns and built-in deterministic functions. The FK columns named in `commission_rules_scope_target_chk` have `RESTRICT` FKs only (§0.C-2, VP-1). The `REGEXP` CHECKs (`billing_period`, `invoice_no`, `payment_no`) must be confirmed on MySQL 8.4 (VP-105). If MySQL refuses them, the fallback is a service rule plus a test, not a weaker CHECK. |
+| **FK actions** | Every FK is `ON DELETE RESTRICT` with `ON UPDATE` unset. No `CASCADE`/`SET NULL`/`SET DEFAULT` (the draft's `invoice_items` `CASCADE` is removed). |
+| **Backward dependencies** | `down()` must run strictly #29 → #21. #21's indexes are FK parents of `invoices` (#23); MySQL refuses to drop an index an FK needs, so #21 can only be rolled back after #23. Rolling back to batch 3 removes only G7/G8 tables and the two added indexes. |
+| **Destructive changes to existing rows** | None. No existing column is altered and no row is updated or deleted. Seeders insert two rows (one rule, one product), idempotently. |
+
+**M4 readiness: BLOCKED — on decisions, not on defects.** No technical defect was found in the corrected specification. M4 cannot start until:
+- D-029 approves Part 4;
+- Q57 (the #21 ALTER, or the no-ALTER alternative) and Q63 (billing cycles) are decided;
+- the remaining Q58–Q77 proposals are accepted or changed;
+- #21 has its separate development-database approval and backup before it reaches `tuitionhub`.
+
+## R4 validation plan (VP-84 onward; to run in M4/E4, not executed)
+
+"DB" cases are direct inserts asserting the MySQL error code and the constraint name. "Model" and "Service" cases need the models or the E4 services.
+
+| ID | Kind | Test | Expected |
+|---|---|---|---|
+| VP-84 | DB | **Cross-tenant invoice:** an invoice whose enrolment belongs to another class, student or institute (each column varied) | 1452 `invoices_enrollment_tenant_fk` |
+| VP-85 | DB | **Foreign fee version:** a fee version of another class | 1452 `invoices_fee_version_class_fk` |
+| VP-86 | DB | **Duplicate period:** two `open` invoices for one enrolment and period; then cancel one and insert again; then two cancelled | 1062 `invoices_period_unique`; accepted; accepted |
+| VP-87 | DB | **Money CHECKs:** `total ≠ subtotal + platform_fee`; `subtotal 0`; negative fee; payment `amount ≠ net + fee`; `net_to_institute 0`; commission `amount −1` | 3819, each naming its CHECK |
+| VP-88 | DB | **Demo pins:** `is_demo = 0` on invoices, payments, commissions and products; `provider = 'stripe'`; `gateway = 'payhere'`; `currency = 'USD'` | 3819, each naming its CHECK |
+| VP-89 | DB | **Vocabularies:** invoice `overdue`/`draft`; payment `refunded`/`processing`; commission `settled`; boost `demo_paid`; item type `platform_fee`; transaction event `refund` | 3819 |
+| VP-90 | DB | **Second pending attempt** for one invoice; then complete the first and insert another pending | 1062 `payments_pending_unique`; accepted |
+| VP-91 | DB | **Second succeeded payment** for one invoice | 1062 `payments_succeeded_unique` |
+| VP-92 | DB | **Idempotency keys:** a duplicate payment key; a duplicate boost key | 1062 `payments_idempotency_key_unique`; 1062 `boost_purchases_idempotency_key_unique` |
+| VP-93 | DB | **Double accrual:** a second commission for one payment; a commission whose institute differs from the payment's | 1062 `platform_commissions_payment_unique`; 1452 `platform_commissions_payment_institute_fk` |
+| VP-94 | DB | **Payment completion CHECK:** `succeeded` without `paid_at`; `pending` with `completed_at`; `failed` with `paid_at` | 3819 `payments_completion_chk` |
+| VP-95 | DB + Service | **One tuition item:** a second `tuition` item | 1062 `invoice_items_invoice_type_unique`; the service writes exactly one, with `amount = subtotal` |
+| VP-96 | DB + Service | **Commission rules:** a second open platform rule; a second open rule for one institute or class; a class rule for a class of another institute; `flat` with a percentage; `percentage` of 0 or 101; `platform` with an `institute_id` | 1062 `commission_rules_active_unique`; 1452 `commission_rules_class_institute_fk`; 3819 for the rest. Service: no platform rule in force → `500` (fail closed) |
+| VP-97 | Service (E4) | **Resolution and snapshot:** a class rule beats an institute rule, which beats the platform rule. Rs 2,500 + flat 100 = 2,600, owed 2,500. A percentage rounds half-up to 2 decimals. Changing the rule or the fee afterwards leaves the invoice, payment and accrual unchanged | As described |
+| VP-98 | Service (E4) | **Payment idempotency:** a replay with the same key, invoice and payer → `200` with the original; the same key with another invoice or payer → `409`; client amounts → `422` | As described |
+| VP-99 | Service (E4) | **Completion:** `succeeded` → payment `succeeded`, invoice `paid`, exactly one accrual. Repeating the same outcome → `200`; a different outcome → `409`. A second attempt on a paid invoice → `409` with the attempt unchanged | As described |
+| VP-100 | Service (E4) | **Demo flag:** the completion route returns `404` when the flag is off and when `APP_ENV=production` | As described |
+| VP-101 | Service (E4) | **Billing access (Q36):** any actively linked guardian can view and pay; a revoked guardian → `404`; `super_admin` and institute users cannot create attempts (`403`); `billed_guardian_id` never changes | As described |
+| VP-102 | DB + Model | **Immutability and history:** changing an invoice's amount or snapshot, or a payment amount; deleting an invoice with items or payments, a payment with transactions or an accrual, a used rule or product | `LogicException` before any query; 1451 with the named FK |
+| VP-103 | Service (E4) | **Boost:** a purchase stores the product price snapshot; changing the product price later leaves it unchanged; an inactive product → `422`; the catalogue (§7.5) ordering is identical before and after a purchase | As described |
+| VP-104 | DB + Model | Writing `scope_target_id`, `active_flag`, `billable_flag`, `pending_flag` or `succeeded_flag` directly | 3105; the model refuses before any query |
+| VP-105 | Structure | `DECIMAL(15,2)` on every money column and `DECIMAL(5,2)` on percentages; `DATETIME`/`DATE` types; no `deleted_at` and no settlement/payout/refund column anywhere; generated expressions; the three `REGEXP` CHECKs (`billing_period`, `invoice_no`, `payment_no`) accepted by MySQL 8.4; `invoice_no`/`payment_no` are `VARCHAR(48)`; every named index; FK rules `RESTRICT`; migration order | As specified |
+| VP-106 | Model | Morph aliases `commission_rule`, `invoice`, `invoice_item`, `payment`, `payment_transaction`, `platform_commission`, `boost_product`, `boost_purchase`. Public UUIDs only where §11/§12 address rows. No internal ids serialized | As described |
+| VP-107 | Service (E4) | **Lock order:** the executed SQL for each write in the lock table takes its explicit locks in the documented order (as D-027's lock-order tests) | As described |
+| VP-108 | Logging | No invoice, payment or boost path logs amounts with personal data, payer phones or idempotency keys | Captured logs are clean |
+| VP-109 | DB + Service | **Number assignment:** insert an invoice and a payment with a 40-character `TMP-<uuid>` placeholder, then finalise in the same transaction. Separately: a value of 49 characters; a malformed number (`INV-2026-13-000001`, `ABC`); a transaction that fails after the placeholder insert | Accepted and finalised to `INV-YYYY-MM-NNNNNN` / `PAY-YYYY-MM-NNNNNN`; 1406 (too long); 3819 `invoices_invoice_no_chk`/`payments_payment_no_chk`; after the failure no row exists. After every service call no committed row starts with `TMP-` |
+| VP-110 | Service (E4) | **Active class required:** an active enrolment in a `draft` class, then in an `archived` class; a withdrawn enrolment in an active class | `409 not_active` each time, checked after the institute → class → enrolment locks; no invoice row |
+| VP-111 | Service (E4), **two processes** | **Concurrent same-key attempts:** two processes send the same key for the same invoice and payer at once | One `201`, one `200` replay of the same payment; exactly one payment row and one `attempt_created` transaction |
+| VP-112 | Service (E4) | **Same key, another invoice** (same institute, same payer) | Sanitized `409 idempotency_key_reused`; no new row; the body names nothing about the first payment |
+| VP-113 | Service (E4) | **Same key at another institute:** the key exists for institute B; a payer at institute A reuses it | Sanitized `409`; the response, logs and audit name nothing from institute B. The executed SQL shows no explicit lock and no `FOR SHARE` on B's rows |
+| VP-114 | Service (E4) | **Replay after the winner commits:** the second request arrives after the first committed (pre-check hit), and also via a forced 1062 in step B | `200` with the original payment in its current state, read in a fresh transaction (not the failed transaction's snapshot) |
+| VP-115 | Service (E4), **two processes** | **No double success / accrual:** two processes complete the **same** pending attempt with `succeeded` at once. Afterwards, a new attempt is started on the now-paid invoice | Exactly one `succeeded` payment and exactly one `platform_commissions` row. The second completion returns the same result (`200`, same outcome); the new attempt → `409` (invoice not open) |
+| VP-116 | Service (E4) | **Lock order on every idempotency path** (normal, pre-check hit, 1062 → resolve, completion), from the executed SQL | Locks are always own institute → invoice/class → payment/purchase; none reversed; never another institute's row locked by the service |
+| VP-117 | Logging | **Keys never logged:** a 1062 on an idempotency key, plus replays and conflicts, with logs captured | No idempotency key, and no `Duplicate entry` message, in logs, audit rows or responses |
+| VP-118 | Service (E4) | **Boost idempotency:** the same key, class and purchaser → `200` replay; another class → `409`; another institute → sanitized `409`; concurrent duplicate (two processes) | As described; exactly one purchase row |
+| VP-119 | Service (E4) | **Billing cycles (per the Q63 choice).** A: `term` and `one_time` fee versions → `422`, no invoice. B: a second `one_time` invoice for the same enrolment in a later month → `409 already_invoiced`; after cancelling the first, allowed; `term` → `422` | As described |
+| VP-120 | Service (E4) | **Money precision:** the rounding examples in "Money arithmetic and precision"; ties at `.xx5`; `0.01` subtotal; `100.00 %`; flat `100.00` (2500 → 2600); `subtotal` at the `DECIMAL(15,2)` maximum with a fee that would push `total` over it | Exact string results; the overflow case → `422`, nothing written; no float anywhere (amounts asserted as strings) |
+| VP-121 | Service (E4) | **bcmath missing:** the extension check reports bcmath unavailable (injected checker) | Invoice and payment creation fail closed; no row written; the log has no amounts |
+| VP-123 | Service (E4) | **Billing date eligibility (Q77):** class and enrolment active, `enrolled_on = 2026-12-01`; invoice `issued_on` `2026-11-15`, `2026-11-30`, `2026-12-01`, `2026-12-15`. Plus the check order: an archived class with a future enrolment → `409 not_active` (rule 1 before rule 3) | `422` on `issued_on` for the first two, nothing written; `201` for the last two (monthly fee version per Q63); `409 not_active` for the archived class |
+| VP-122 | Service (E4) | **Demo labels:** every §11/§12 response, including errors that return a money object | Every money object has `demo: true`; every response carries a `demo_label` (after the Q76 contract amendment) |
+
+## R4 open questions (Q57 onward)
+
+| # | Topic | Proposal | Status |
+|---|---|---|---|
+| Q57 | Migration #21 adds unique keys to two **applied** tables (`class_enrollments`, `class_fee_versions`) so that one composite FK pins enrolment/class/student/institute and fee/class | Approve the ALTER (index only, non-destructive). **Alternative:** no ALTER; use the existing `(id, class_id)` and `(class_id, institute_id)` parents, and leave "the enrolment's student is the invoice's student" and "the fee belongs to the class" as tested service rules | **Open** |
+| Q58 | X8: `fee_amount_snapshot` column | Not built; `subtotal` is the snapshot and `fee_version_id` its source. Contract §2.3 to be amended | **Open** |
+| Q59 | Zero-fee rules (`flat_amount = 0`), e.g. a promotion | Not allowed (`> 0`); a zero rule would need a decision on C3 transparency | **Open** |
+| Q60 | Percentage precision and range | `DECIMAL(5,2)`, `0 < p <= 100` (the draft had `DECIMAL(7,4)`) | **Open** |
+| Q61 | Seed `effective_from` for the platform rule | `2026-01-01`, before any demo invoice | **Open** |
+| Q62 | `invoice_no` / `payment_no` generation (unique, readable) | `VARCHAR(48)`. Insert with a 40-character `TMP-<uuid>` placeholder, then set `INV-YYYY-MM-` / `PAY-YYYY-MM-` + zero-padded `id` by primary key in the same transaction ("Invoice and payment numbers"); format CHECKs; VP-109. Numbers are global with gaps after rollbacks. **Alternative:** a counter table (new; extra lock) for gap-free per-month sequences | **Open** |
+| Q63 | Billing cycles: `invoices_period_unique` lets a `one_time` enrolment be invoiced again in a different month; `term` has no calendar | **Founder choice between A (monthly only; `term`/`one_time` → `422`) and B (monthly plus one-time, with a lifetime one-time rule under the class/enrolment locks and an optional DB backstop)**. `term` is deferred under both. See "Billing cycles". **Recommended: A — monthly-only demo billing** (no snapshot column, no lifetime-uniqueness rule; one-time and term deferred) | **Open — founder decision required** |
+| Q64 | `invoices.created_by_user_id` | Store the billing user (the audit row also records it) | **Open** |
+| Q65 | Invoice cancellation | No endpoint in E4; the `cancelled` status and the unique key support a later one | **Open** |
+| Q66 | Idempotency key format | A client UUID, stored as `CHAR(36)` and validated as a UUID (`422` otherwise); the draft had `VARCHAR(100)`. Keys are never logged, audited or echoed | **Open** |
+| Q67 | Gateway JSON payload columns | Not built for the mock gateway; added with a real gateway after a PII review | **Open** |
+| Q68 | Commission snapshot columns on payments | Not duplicated; payments copy only `platform_fee`, while invoices and accruals hold the rule snapshot | **Open** |
+| Q69 | Demo boost product price | `1500.00` LKR, from the contract example | **Open** |
+| Q70 | Boost product name snapshot | Not built; the response reads the (seeded, unchanged) product name | **Open** |
+| Q71 | Commission `scope` snapshot column (`commission_scope_snapshot`), not listed in contract §2.3 | Add it, so `Invoice.commission.scope` and §11.8 never depend on the rule row | **Open** |
+| Q72 | The institute lock serialises payments with all other writes of that institute | Accepted for the demo sprint (as Q56) | **Open** |
+| Q73 | Invoice creation also requires an **active class** (`draft`/`archived` → `409 not_active`), checked after the institute → class → enrolment locks | Adopt; amend contract §11.2 (it states only the enrolment rule) | **Open** |
+| Q74 | Idempotency collisions, including a key used at another institute | Adopt "Idempotency keys and duplicate-key resolution": authorization first; replay only for the same identity at the same institute; otherwise a sanitized `409 idempotency_key_reused` (new reason code, contract §1.3/§11.6/§12.2 amendment); resolve in a fresh transaction; never lock another institute's row explicitly; outermost transaction only | **Open** |
+| Q75 | Arbitrary-precision engine | `bcmath` (enabled in development; required in production; fail closed if missing). **Alternative:** `brick/math`, already installed via `laravel/framework`, if approved as a direct dependency | **Open** |
+| Q76 | `demo_label` on §12.1 products and the §11.7 completion payload | Add it, so every money response carries the label (contract amendment) | **Open** |
+| Q77 | Billing a future-dated enrolment (`status = 'active'`, `enrolled_on` after `issued_on`) | Invoice only when the enrolment is **effective on `issued_on`** (`enrolled_on <= issued_on`), checked after the institute → class → enrolment locks; otherwise `422` on `issued_on`. No advance billing. See "Billing date eligibility"; VP-123 | **Open — PROPOSED** |
+
+## M4 + E4 implementation outline (after approval)
+
+- **M4 — schema only** (as M3): migrations #21–#29; models `CommissionRule`, `Invoice`, `InvoiceItem`, `Payment`, `PaymentTransaction`, `PlatformCommission`, `BoostProduct`, `BoostPurchase`.
+  - Model behaviour: casts (`decimal:2` for money), hidden internal ids, `HasPublicUuid` where §11/§12 address rows, `GuardsGeneratedColumns`, immutability guards.
+  - Wiring: morph aliases; the two seeders; `SchemaFixtures` helpers.
+  - Tests: constraint tests VP-84–VP-96 (DB half), VP-102, VP-104–VP-106.
+  - Verify on `tuitionhub_test` only. Applying to `tuitionhub` is a separate approval with a backup.
+- **E4 — endpoints** (contract §11.2–§11.8, §12.1–§12.3):
+  - Services: `CommissionResolver` (bcmath, half-up, runtime extension check), `InvoiceService` (active class and enrolment, numbers, billing-cycle rule per Q63), `PaymentService` (attempt + demo completion), `BoostPurchaseService`.
+    - All run under `Transactions::retrying()` with the lock order above.
+    - The idempotency resolution protocol applies, and these services are outermost transactions only.
+  - Policies: billing user, any active linked guardian, `super_admin` read-only.
+  - Routing: the demo-completion route registered only when `DEMO_PAYMENTS_ENABLED=true` and not in production.
+  - Responses: `demo: true` and the labels on every response.
+  - Tests: VP-97–VP-101, VP-103, VP-107, VP-108, VP-110–VP-123, plus authorization matrices and audit payloads. VP-111, VP-115 and VP-118's concurrent case need a **genuine two-process harness**, which is **required before release** (E2c).
+  - Docs: contract changelog and a D-entry.
+- **Frontend afterwards:** parent fees and the institute fees page move from sample data to §11 (the demo-fee helper `utils/demoFees.ts` is replaced by API snapshots).
